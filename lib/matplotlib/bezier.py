@@ -31,8 +31,9 @@ def get_intersection(cx1, cy1, cos_t1, sin_t1,
     c, d = sin_t2, -cos_t2
 
     ad_bc = a * d - b * c
-    if ad_bc == 0.:
-        raise ValueError("Given lines do not intersect")
+    if np.abs(ad_bc) < 1.0e-12:
+        raise ValueError("Given lines do not intersect. Please verify that "
+                         "the angles are not equal or differ by 180 degrees.")
 
     # rhs_inverse
     a_, b_ = d, -b
@@ -278,7 +279,7 @@ def split_path_inout(path, inside, tolerence=0.01, reorder_inout=False):
         path_out = Path(concat([verts_right, path.vertices[i:]]),
                         concat([codes_right, path.codes[i:]]))
 
-    if reorder_inout and begin_inside is False:
+    if reorder_inout and not begin_inside:
         path_in, path_out = path_out, path_in
 
     return path_in, path_out

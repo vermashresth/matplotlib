@@ -23,13 +23,18 @@ backend_version = "%s.%s.%s" % (
 # see http://groups.google.com/groups?q=screen+dpi+x11&hl=en&lr=&ie=UTF-8&oe=UTF-8&safe=off&selm=7077.26e81ad5%40swift.cs.tcd.ie&rnum=5 for some info about screen dpi
 PIXELS_PER_INCH = 96
 
-cursord = {
-    cursors.MOVE          : Gdk.Cursor.new(Gdk.CursorType.FLEUR),
-    cursors.HAND          : Gdk.Cursor.new(Gdk.CursorType.HAND2),
-    cursors.POINTER       : Gdk.Cursor.new(Gdk.CursorType.LEFT_PTR),
-    cursors.SELECT_REGION : Gdk.Cursor.new(Gdk.CursorType.TCROSS),
-    cursors.WAIT          : Gdk.Cursor.new(Gdk.CursorType.WATCH),
+try:
+    cursord = {
+        cursors.MOVE          : Gdk.Cursor.new(Gdk.CursorType.FLEUR),
+        cursors.HAND          : Gdk.Cursor.new(Gdk.CursorType.HAND2),
+        cursors.POINTER       : Gdk.Cursor.new(Gdk.CursorType.LEFT_PTR),
+        cursors.SELECT_REGION : Gdk.Cursor.new(Gdk.CursorType.TCROSS),
+        cursors.WAIT          : Gdk.Cursor.new(Gdk.CursorType.WATCH),
     }
+except TypeError as exc:
+    # Happens when running headless.  Convert to ImportError to cooperate with
+    # backend switching.
+    raise ImportError(exc)
 
 
 class TimerGTK3(TimerBase):
@@ -71,7 +76,7 @@ class TimerGTK3(TimerBase):
 
         # Gtk timeout_add() requires that the callback returns True if it
         # is to be called again.
-        if len(self.callbacks) > 0 and not self._single:
+        if self.callbacks and not self._single:
             return True
         else:
             self._timer = None
@@ -262,7 +267,7 @@ class FigureCanvasGTK3(Gtk.DrawingArea, FigureCanvasBase):
             return
         w, h = event.width, event.height
         if w < 3 or h < 3:
-            return # empty fig
+            return  # empty fig
         # resize the figure (in inches)
         dpi = self.figure.dpi
         self.figure.set_size_inches(w / dpi, h / dpi, forward=False)
@@ -923,6 +928,15 @@ class HelpGTK3(backend_tools.ToolHelpBase):
             self._show_shortcuts_dialog()
 
 
+class ToolCopyToClipboardGTK3(backend_tools.ToolCopyToClipboardBase):
+    def trigger(self, *args, **kwargs):
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        window = self.canvas.get_window()
+        x, y, width, height = window.get_geometry()
+        pb = Gdk.pixbuf_get_from_window(window, x, y, width, height)
+        clipboard.set_image(pb)
+
+
 # Define the file to use as the GTk icon
 if sys.platform == 'win32':
     icon_filename = 'matplotlib.png'
@@ -933,7 +947,7 @@ window_icon = os.path.join(
 
 
 def error_msg_gtk(msg, parent=None):
-    if parent is not None: # find the toplevel Gtk.Window
+    if parent is not None:  # find the toplevel Gtk.Window
         parent = parent.get_toplevel()
         if not parent.is_toplevel():
             parent = None
@@ -955,12 +969,14 @@ backend_tools.ToolConfigureSubplots = ConfigureSubplotsGTK3
 backend_tools.ToolSetCursor = SetCursorGTK3
 backend_tools.ToolRubberband = RubberbandGTK3
 backend_tools.ToolHelp = HelpGTK3
+backend_tools.ToolCopyToClipboard = ToolCopyToClipboardGTK3
 
 Toolbar = ToolbarGTK3
 
 
 @_Backend.export
 class _BackendGTK3(_Backend):
+    required_interactive_framework = "gtk3"
     FigureCanvas = FigureCanvasGTK3
     FigureManager = FigureManagerGTK3
 

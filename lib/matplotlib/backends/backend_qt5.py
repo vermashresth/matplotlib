@@ -14,7 +14,6 @@ from matplotlib.backend_bases import (
     TimerBase, cursors, ToolContainerBase, StatusbarBase)
 import matplotlib.backends.qt_editor.figureoptions as figureoptions
 from matplotlib.backends.qt_editor.formsubplottool import UiSubplotTool
-from matplotlib.figure import Figure
 from matplotlib.backend_managers import ToolManager
 
 from .qt_compat import (
@@ -163,10 +162,10 @@ def _allow_super_init(__init__):
             next_coop_init.__init__(self, *args, **kwargs)
 
         @functools.wraps(__init__)
-        def wrapper(self, **kwargs):
+        def wrapper(self, *args, **kwargs):
             with cbook._setattr_cm(QtWidgets.QWidget,
                                    __init__=cooperative_qwidget_init):
-                __init__(self, **kwargs)
+                __init__(self, *args, **kwargs)
 
         return wrapper
 
@@ -241,6 +240,7 @@ class FigureCanvasQT(QtWidgets.QWidget, FigureCanvasBase):
         self._dpi_ratio_prev = None
 
         self._draw_pending = False
+        self._erase_before_paint = False
         self._is_drawing = False
         self._draw_rect_callback = lambda painter: None
 
@@ -291,7 +291,11 @@ class FigureCanvasQT(QtWidgets.QWidget, FigureCanvasBase):
         return int(w / self._dpi_ratio), int(h / self._dpi_ratio)
 
     def enterEvent(self, event):
-        x, y = self.mouseEventCoords(event.pos())
+        try:
+            x, y = self.mouseEventCoords(event.pos())
+        except AttributeError:
+            # the event from PyQt4 does not include the position
+            x = y = None
         FigureCanvasBase.enter_notify_event(self, guiEvent=event, xy=(x, y))
 
     def leaveEvent(self, event):
@@ -372,9 +376,8 @@ class FigureCanvasQT(QtWidgets.QWidget, FigureCanvasBase):
         if key is not None:
             FigureCanvasBase.key_release_event(self, key, guiEvent=event)
 
+    @cbook.deprecated("3.0", alternative="event.guiEvent.isAutoRepeat")
     @property
-    @cbook.deprecated("3.0", "Manually check `event.guiEvent.isAutoRepeat()` "
-                      "in the event handler.")
     def keyAutoRepeat(self):
         """
         If True, enable auto-repeat for key events.
@@ -382,8 +385,6 @@ class FigureCanvasQT(QtWidgets.QWidget, FigureCanvasBase):
         return self._keyautorepeat
 
     @keyAutoRepeat.setter
-    @cbook.deprecated("3.0", "Manually check `event.guiEvent.isAutoRepeat()` "
-                      "in the event handler.")
     def keyAutoRepeat(self, val):
         self._keyautorepeat = bool(val)
 
@@ -490,6 +491,7 @@ class FigureCanvasQT(QtWidgets.QWidget, FigureCanvasBase):
             return
         with cbook._setattr_cm(self, _is_drawing=True):
             super().draw()
+        self._erase_before_paint = True
         self.update()
 
     def draw_idle(self):
@@ -605,8 +607,7 @@ class FigureManagerQT(FigureManagerBase):
         # requested size:
         cs = canvas.sizeHint()
         sbs = self.window.statusBar().sizeHint()
-        self._status_and_tool_height = tbs_height + sbs.height()
-        height = cs.height() + self._status_and_tool_height
+        height = cs.height() + tbs_height + sbs.height()
         self.window.resize(cs.width(), height)
 
         self.window.setCentralWidget(self.canvas)
@@ -654,8 +655,11 @@ class FigureManagerQT(FigureManagerBase):
         return toolmanager
 
     def resize(self, width, height):
-        'set the canvas size in pixels'
-        self.window.resize(width, height + self._status_and_tool_height)
+        # these are Qt methods so they return sizes in 'virtual' pixels
+        # so we do not need to worry about dpi scaling here.
+        extra_width = self.window.width() - self.canvas.width()
+        extra_height = self.window.height() - self.canvas.height()
+        self.window.resize(width+extra_width, height+extra_height)
 
     def show(self):
         self.window.show()
@@ -669,7 +673,6 @@ class FigureManagerQT(FigureManagerBase):
         if self.window._destroying:
             return
         self.window._destroying = True
-        self.window.destroyed.connect(self._widgetclosed)
         if self.toolbar:
             self.toolbar.destroy()
         self.window.close()
@@ -1064,11 +1067,18 @@ class HelpQt(backend_tools.ToolHelpBase):
         QtWidgets.QMessageBox.information(None, "Help", self._get_help_html())
 
 
+class ToolCopyToClipboardQT(backend_tools.ToolCopyToClipboardBase):
+    def trigger(self, *args, **kwargs):
+        pixmap = self.canvas.grab()
+        qApp.clipboard().setPixmap(pixmap)
+
+
 backend_tools.ToolSaveFigure = SaveFigureQt
 backend_tools.ToolConfigureSubplots = ConfigureSubplotsQt
 backend_tools.ToolSetCursor = SetCursorQt
 backend_tools.ToolRubberband = RubberbandQt
 backend_tools.ToolHelp = HelpQt
+backend_tools.ToolCopyToClipboard = ToolCopyToClipboardQT
 
 
 @cbook.deprecated("3.0")
@@ -1100,6 +1110,7 @@ def exception_handler(type, value, tb):
 
 @_Backend.export
 class _BackendQT5(_Backend):
+    required_interactive_framework = "qt5"
     FigureCanvas = FigureCanvasQT
     FigureManager = FigureManagerQT
 

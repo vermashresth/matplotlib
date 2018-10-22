@@ -32,10 +32,7 @@ graphics contexts must implement to serve as a matplotlib backend
     The base class for the messaging area.
 """
 
-import six
-
 from contextlib import contextmanager
-from functools import partial
 import importlib
 import io
 import os
@@ -50,13 +47,17 @@ from matplotlib import (
     backend_tools as tools, cbook, colors, textpath, tight_bbox, transforms,
     widgets, get_backend, is_interactive, rcParams)
 from matplotlib._pylab_helpers import Gcf
-from matplotlib.transforms import Bbox, TransformedBbox, Affine2D
+from matplotlib.transforms import Affine2D
 from matplotlib.path import Path
 
 try:
-    from PIL import Image
-    _has_pil = True
-    del Image
+    from PIL import PILLOW_VERSION
+    from distutils.version import LooseVersion
+    if LooseVersion(PILLOW_VERSION) >= "3.4":
+        _has_pil = True
+    else:
+        _has_pil = False
+    del PILLOW_VERSION
 except ImportError:
     _has_pil = False
 
@@ -116,131 +117,10 @@ def get_registered_canvas_class(format):
     if format not in _default_backends:
         return None
     backend_class = _default_backends[format]
-    if isinstance(backend_class, six.string_types):
+    if isinstance(backend_class, str):
         backend_class = importlib.import_module(backend_class).FigureCanvas
         _default_backends[format] = backend_class
     return backend_class
-
-
-class _Backend(object):
-    # A backend can be defined by using the following pattern:
-    #
-    # @_Backend.export
-    # class FooBackend(_Backend):
-    #     # override the attributes and methods documented below.
-
-    # The following attributes and methods must be overridden by subclasses.
-
-    # The `FigureCanvas` and `FigureManager` classes must be defined.
-    FigureCanvas = None
-    FigureManager = None
-
-    # The following methods must be left as None for non-interactive backends.
-    # For interactive backends, `trigger_manager_draw` should be a function
-    # taking a manager as argument and triggering a canvas draw, and `mainloop`
-    # should be a function taking no argument and starting the backend main
-    # loop.
-    trigger_manager_draw = None
-    mainloop = None
-
-    # The following methods will be automatically defined and exported, but
-    # can be overridden.
-
-    @classmethod
-    def new_figure_manager(cls, num, *args, **kwargs):
-        """Create a new figure manager instance.
-        """
-        # This import needs to happen here due to circular imports.
-        from matplotlib.figure import Figure
-        fig_cls = kwargs.pop('FigureClass', Figure)
-        fig = fig_cls(*args, **kwargs)
-        return cls.new_figure_manager_given_figure(num, fig)
-
-    @classmethod
-    def new_figure_manager_given_figure(cls, num, figure):
-        """Create a new figure manager instance for the given figure.
-        """
-        canvas = cls.FigureCanvas(figure)
-        manager = cls.FigureManager(canvas, num)
-        return manager
-
-    @classmethod
-    def draw_if_interactive(cls):
-        if cls.trigger_manager_draw is not None and is_interactive():
-            manager = Gcf.get_active()
-            if manager:
-                cls.trigger_manager_draw(manager)
-
-    @classmethod
-    def show(cls, block=None):
-        """Show all figures.
-
-        `show` blocks by calling `mainloop` if *block* is ``True``, or if it
-        is ``None`` and we are neither in IPython's ``%pylab`` mode, nor in
-        `interactive` mode.
-        """
-        managers = Gcf.get_all_fig_managers()
-        if not managers:
-            return
-        for manager in managers:
-            try:
-                manager.show()
-            except NonGuiException:
-                warnings.warn(
-                    ('matplotlib is currently using %s, which is a ' +
-                     'non-GUI backend, so cannot show the figure.')
-                    % get_backend())
-                return
-        if cls.mainloop is None:
-            return
-        if block is None:
-            # Hack: Are we in IPython's pylab mode?
-            from matplotlib import pyplot
-            try:
-                # IPython versions >= 0.10 tack the _needmain attribute onto
-                # pyplot.show, and always set it to False, when in %pylab mode.
-                ipython_pylab = not pyplot.show._needmain
-            except AttributeError:
-                ipython_pylab = False
-            block = not ipython_pylab and not is_interactive()
-            # TODO: The above is a hack to get the WebAgg backend working with
-            # ipython's `%pylab` mode until proper integration is implemented.
-            if get_backend() == "WebAgg":
-                block = True
-        if block:
-            cls.mainloop()
-
-    # This method is the one actually exporting the required methods.
-
-    @staticmethod
-    def export(cls):
-        for name in ["FigureCanvas",
-                     "FigureManager",
-                     "new_figure_manager",
-                     "new_figure_manager_given_figure",
-                     "draw_if_interactive",
-                     "show"]:
-            setattr(sys.modules[cls.__module__], name, getattr(cls, name))
-
-        # For back-compatibility, generate a shim `Show` class.
-
-        class Show(ShowBase):
-            def mainloop(self):
-                return cls.mainloop()
-
-        setattr(sys.modules[cls.__module__], "Show", Show)
-        return cls
-
-
-class ShowBase(_Backend):
-    """
-    Simple base class to generate a show() callable in backends.
-
-    Subclass must override mainloop() method.
-    """
-
-    def __call__(self, block=None):
-        return self.show(block=block)
 
 
 class RendererBase(object):
@@ -460,7 +340,7 @@ class RendererBase(object):
         is not the same for every path.
         """
         Npaths = len(paths)
-        if Npaths == 0 or (len(facecolors) == 0 and len(edgecolors) == 0):
+        if Npaths == 0 or len(facecolors) == len(edgecolors) == 0:
             return 0
         Npath_ids = max(Npaths, len(all_transforms))
         N = max(Npath_ids, len(offsets))
@@ -814,6 +694,7 @@ class RendererBase(object):
         """
         return points
 
+    @cbook.deprecated("3.1", alternative="cbook.strip_math")
     def strip_math(self, s):
         return cbook.strip_math(s)
 
@@ -1300,37 +1181,37 @@ class TimerBase(object):
     def _timer_stop(self):
         pass
 
-    def _get_interval(self):
+    @property
+    def interval(self):
         return self._interval
 
-    def _set_interval(self, interval):
+    @interval.setter
+    def interval(self, interval):
         # Force to int since none of the backends actually support fractional
         # milliseconds, and some error or give warnings.
         interval = int(interval)
         self._interval = interval
         self._timer_set_interval()
 
-    interval = property(_get_interval, _set_interval)
-
-    def _get_single_shot(self):
+    @property
+    def single_shot(self):
         return self._single
 
-    def _set_single_shot(self, ss=True):
+    @single_shot.setter
+    def single_shot(self, ss):
         self._single = ss
         self._timer_set_single_shot()
 
-    single_shot = property(_get_single_shot, _set_single_shot)
-
     def add_callback(self, func, *args, **kwargs):
         '''
-        Register `func` to be called by timer when the event fires. Any
-        additional arguments provided will be passed to `func`.
+        Register *func* to be called by timer when the event fires. Any
+        additional arguments provided will be passed to *func*.
         '''
         self.callbacks.append((func, args, kwargs))
 
     def remove_callback(self, func, *args, **kwargs):
         '''
-        Remove `func` from list of callbacks. `args` and `kwargs` are optional
+        Remove *func* from list of callbacks. *args* and *kwargs* are optional
         and used to distinguish between copies of the same function registered
         to be called with different arguments.
         '''
@@ -1451,7 +1332,7 @@ class CloseEvent(Event):
 
 class LocationEvent(Event):
     """
-    An event that has a screen location
+    An event that has a screen location.
 
     The following additional attributes are defined and shown with
     their default values.
@@ -1475,28 +1356,25 @@ class LocationEvent(Event):
 
     ydata : scalar
         y coord of mouse in data coords
-
     """
-    x = None       # x position - pixels from left of canvas
-    y = None       # y position - pixels from right of canvas
-    inaxes = None  # the Axes instance if mouse us over axes
-    xdata = None   # x coord of mouse in data coords
-    ydata = None   # y coord of mouse in data coords
 
-    # the last event that was triggered before this one
-    lastevent = None
+    lastevent = None  # the last event that was triggered before this one
 
     def __init__(self, name, canvas, x, y, guiEvent=None):
         """
         *x*, *y* in figure coords, 0,0 = bottom, left
         """
         Event.__init__(self, name, canvas, guiEvent=guiEvent)
-        self.x = x
-        self.y = y
+        # x position - pixels from left of canvas
+        self.x = int(x) if x is not None else x
+        # y position - pixels from right of canvas
+        self.y = int(y) if y is not None else y
+        self.inaxes = None  # the Axes instance if mouse us over axes
+        self.xdata = None   # x coord of mouse in data coords
+        self.ydata = None   # y coord of mouse in data coords
 
         if x is None or y is None:
             # cannot check if event was in axes if no x,y info
-            self.inaxes = None
             self._update_enter_leave()
             return
 
@@ -1513,13 +1391,10 @@ class LocationEvent(Event):
                 trans = self.inaxes.transData.inverted()
                 xdata, ydata = trans.transform_point((x, y))
             except ValueError:
-                self.xdata = None
-                self.ydata = None
+                pass
             else:
                 self.xdata = xdata
                 self.ydata = ydata
-        else:
-            self.inaxes = None
 
         self._update_enter_leave()
 
@@ -1532,7 +1407,7 @@ class LocationEvent(Event):
                 try:
                     if last.inaxes is not None:
                         last.canvas.callbacks.process('axes_leave_event', last)
-                except:
+                except Exception:
                     pass
                     # See ticket 2901582.
                     # I think this is a valid exception to the rule
@@ -1562,18 +1437,21 @@ class MouseEvent(LocationEvent):
 
     Attributes
     ----------
-    button : None, scalar, or str
-        button pressed None, 1, 2, 3, 'up', 'down' (up and down are used
-        for scroll events).  Note that in the nbagg backend, both the
-        middle and right clicks return 3 since right clicking will bring
-        up the context menu in some browsers.
+    button : {None, 1, 2, 3, 'up', 'down'}
+        The button pressed. 'up' and 'down' are used for scroll events.
+        Note that in the nbagg backend, both the middle and right clicks
+        return 3 since right clicking will bring up the context menu in
+        some browsers.
 
-    key : None, or str
-        the key depressed when the mouse event triggered (see
-        :class:`KeyEvent`)
+    key : None or str
+        The key pressed when the mouse event triggered, e.g. 'shift'.
+        See `KeyEvent`.
 
     step : scalar
-        number of scroll steps (positive for 'up', negative for 'down')
+        The Number of scroll steps (positive for 'up', negative for 'down').
+
+    dblclick : bool
+        *True* if the event is a double-click.
 
     Examples
     --------
@@ -1583,16 +1461,7 @@ class MouseEvent(LocationEvent):
             print('you pressed', event.button, event.xdata, event.ydata)
 
         cid = fig.canvas.mpl_connect('button_press_event', on_press)
-
     """
-    x = None         # x position - pixels from left of canvas
-    y = None         # y position - pixels from right of canvas
-    button = None    # button pressed None, 1, 2, 3
-    dblclick = None  # whether or not the event is the result of a double click
-    inaxes = None    # the Axes instance if mouse us over axes
-    xdata = None     # x coord of mouse in data coords
-    ydata = None     # y coord of mouse in data coords
-    step = None      # scroll steps for scroll events
 
     def __init__(self, name, canvas, x, y, button=None, key=None,
                  step=0, dblclick=False, guiEvent=None):
@@ -1979,7 +1848,7 @@ class FigureCanvasBase(object):
         ----------
         guiEvent
             the native UI event that generated the mpl event
-        xy : tuple of 2 scalars
+        xy : (float, float)
             the coordinate location of the pointer when the canvas is
             entered
 
@@ -2023,7 +1892,16 @@ class FigureCanvasBase(object):
 
     def draw_idle(self, *args, **kwargs):
         """
-        :meth:`draw` only if idle; defaults to draw but backends can override
+        Request a widget redraw once control returns to the GUI event loop.
+
+        Even if multiple calls to `draw_idle` occur before control returns
+        to the GUI event loop, the figure will only be rendered once.
+
+        Note
+        ----
+        Backends may choose to override the method and implement their own
+        strategy to prevent multiple renderings.
+
         """
         if not self._is_idle_drawing:
             with self._idle_draw_cntx():
@@ -2054,7 +1932,7 @@ class FigureCanvasBase(object):
         Experts Group', and the values are a list of filename extensions used
         for that filetype, such as ['jpg', 'jpeg']."""
         groupings = {}
-        for ext, name in six.iteritems(cls.filetypes):
+        for ext, name in cls.filetypes.items():
             groupings.setdefault(name, []).append(ext)
             groupings[name].sort()
         return groupings
@@ -2079,7 +1957,8 @@ class FigureCanvasBase(object):
             .format(fmt, ", ".join(sorted(self.get_supported_filetypes()))))
 
     def print_figure(self, filename, dpi=None, facecolor=None, edgecolor=None,
-                     orientation='portrait', format=None, **kwargs):
+                     orientation='portrait', format=None,
+                     *, bbox_inches=None, **kwargs):
         """
         Render the figure to hardcopy. Set the figure patch face and edge
         colors.  This is useful because some of the GUIs have a gray figure
@@ -2124,11 +2003,11 @@ class FigureCanvasBase(object):
             # get format from filename, or from backend's default filetype
             if isinstance(filename, getattr(os, "PathLike", ())):
                 filename = os.fspath(filename)
-            if isinstance(filename, six.string_types):
+            if isinstance(filename, str):
                 format = os.path.splitext(filename)[1][1:]
             if format is None or format == '':
                 format = self.get_default_filetype()
-                if isinstance(filename, six.string_types):
+                if isinstance(filename, str):
                     filename = filename.rstrip('.') + '.' + format
         format = format.lower()
 
@@ -2160,7 +2039,6 @@ class FigureCanvasBase(object):
             self.figure.set_facecolor(facecolor)
             self.figure.set_edgecolor(edgecolor)
 
-            bbox_inches = kwargs.pop("bbox_inches", None)
             if bbox_inches is None:
                 bbox_inches = rcParams['savefig.bbox']
 
@@ -2179,36 +2057,9 @@ class FigureCanvasBase(object):
                         dryrun=True,
                         **kwargs)
                     renderer = self.figure._cachedRenderer
-                    bbox_inches = self.figure.get_tightbbox(renderer)
-
                     bbox_artists = kwargs.pop("bbox_extra_artists", None)
-                    if bbox_artists is None:
-                        bbox_artists = \
-                            self.figure.get_default_bbox_extra_artists()
-
-                    bbox_filtered = []
-                    for a in bbox_artists:
-                        bbox = a.get_window_extent(renderer)
-                        if a.get_clip_on():
-                            clip_box = a.get_clip_box()
-                            if clip_box is not None:
-                                bbox = Bbox.intersection(bbox, clip_box)
-                            clip_path = a.get_clip_path()
-                            if clip_path is not None and bbox is not None:
-                                clip_path = \
-                                    clip_path.get_fully_transformed_path()
-                                bbox = Bbox.intersection(
-                                    bbox, clip_path.get_extents())
-                        if bbox is not None and (
-                                bbox.width != 0 or bbox.height != 0):
-                            bbox_filtered.append(bbox)
-
-                    if bbox_filtered:
-                        _bbox = Bbox.union(bbox_filtered)
-                        trans = Affine2D().scale(1.0 / self.figure.dpi)
-                        bbox_extra = TransformedBbox(_bbox, trans)
-                        bbox_inches = Bbox.union([bbox_inches, bbox_extra])
-
+                    bbox_inches = self.figure.get_tightbbox(renderer,
+                            bbox_extra_artists=bbox_artists)
                     pad = kwargs.pop("pad_inches", None)
                     if pad is None:
                         pad = rcParams['savefig.pad_inches']
@@ -2495,9 +2346,9 @@ def key_press_handler(event, canvas, toolbar=None):
     def _get_uniform_gridstate(ticks):
         # Return True/False if all grid lines are on or off, None if they are
         # not all in the same state.
-        if all(tick.gridOn for tick in ticks):
+        if all(tick.gridline.get_visible() for tick in ticks):
             return True
-        elif not any(tick.gridOn for tick in ticks):
+        elif not any(tick.gridline.get_visible() for tick in ticks):
             return False
         else:
             return None
@@ -2727,7 +2578,7 @@ class NavigationToolbar2(object):
     # )
     toolitems = (
         ('Home', 'Reset original view', 'home', 'home'),
-        ('Back', 'Back to  previous view', 'back', 'back'),
+        ('Back', 'Back to previous view', 'back', 'back'),
         ('Forward', 'Forward to next view', 'forward', 'forward'),
         (None, None, None, None),
         ('Pan', 'Pan axes with left mouse, zoom with right', 'move', 'pan'),
@@ -2838,8 +2689,8 @@ class NavigationToolbar2(object):
             except (ValueError, OverflowError):
                 pass
             else:
-                artists = [a for a in event.inaxes.mouseover_set
-                           if a.contains(event) and a.get_visible()]
+                artists = [a for a in event.inaxes._mouseover_set
+                           if a.contains(event)[0] and a.get_visible()]
 
                 if artists:
                     a = cbook._topmost_artist(artists)
@@ -3044,8 +2895,8 @@ class NavigationToolbar2(object):
             # ignore singular clicks - 5 pixels is a threshold
             # allows the user to "cancel" a zoom action
             # by zooming by less than 5 pixels
-            if ((abs(x - lastx) < 5 and self._zoom_mode!="y") or
-                    (abs(y - lasty) < 5 and self._zoom_mode!="x")):
+            if ((abs(x - lastx) < 5 and self._zoom_mode != "y") or
+                    (abs(y - lasty) < 5 and self._zoom_mode != "x")):
                 self._xypress = None
                 self.release(event)
                 self.draw()
@@ -3247,7 +3098,7 @@ class ToolContainerBase(object):
 
         Parameters
         ----------
-        name : String
+        name : string
             Name (id) of the tool triggered from within the container
         """
         self.toolmanager.trigger_tool(name, sender=self)
@@ -3332,3 +3183,127 @@ class StatusbarBase(object):
             Message text
         """
         pass
+
+
+class _Backend(object):
+    # A backend can be defined by using the following pattern:
+    #
+    # @_Backend.export
+    # class FooBackend(_Backend):
+    #     # override the attributes and methods documented below.
+
+    # Set to one of {"qt5", "qt4", "gtk3", "wx", "tk", "macosx"} if an
+    # interactive framework is required, or None otherwise.
+    required_interactive_framework = None
+
+    # `backend_version` may be overridden by the subclass.
+    backend_version = "unknown"
+
+    # The `FigureCanvas` class must be defined.
+    FigureCanvas = None
+
+    # For interactive backends, the `FigureManager` class must be overridden.
+    FigureManager = FigureManagerBase
+
+    # The following methods must be left as None for non-interactive backends.
+    # For interactive backends, `trigger_manager_draw` should be a function
+    # taking a manager as argument and triggering a canvas draw, and `mainloop`
+    # should be a function taking no argument and starting the backend main
+    # loop.
+    trigger_manager_draw = None
+    mainloop = None
+
+    # The following methods will be automatically defined and exported, but
+    # can be overridden.
+
+    @classmethod
+    def new_figure_manager(cls, num, *args, **kwargs):
+        """Create a new figure manager instance.
+        """
+        # This import needs to happen here due to circular imports.
+        from matplotlib.figure import Figure
+        fig_cls = kwargs.pop('FigureClass', Figure)
+        fig = fig_cls(*args, **kwargs)
+        return cls.new_figure_manager_given_figure(num, fig)
+
+    @classmethod
+    def new_figure_manager_given_figure(cls, num, figure):
+        """Create a new figure manager instance for the given figure.
+        """
+        canvas = cls.FigureCanvas(figure)
+        manager = cls.FigureManager(canvas, num)
+        return manager
+
+    @classmethod
+    def draw_if_interactive(cls):
+        if cls.trigger_manager_draw is not None and is_interactive():
+            manager = Gcf.get_active()
+            if manager:
+                cls.trigger_manager_draw(manager)
+
+    @classmethod
+    def show(cls, block=None):
+        """Show all figures.
+
+        `show` blocks by calling `mainloop` if *block* is ``True``, or if it
+        is ``None`` and we are neither in IPython's ``%pylab`` mode, nor in
+        `interactive` mode.
+        """
+        managers = Gcf.get_all_fig_managers()
+        if not managers:
+            return
+        for manager in managers:
+            # Emits a warning if the backend is non-interactive.
+            manager.canvas.figure.show()
+        if cls.mainloop is None:
+            return
+        if block is None:
+            # Hack: Are we in IPython's pylab mode?
+            from matplotlib import pyplot
+            try:
+                # IPython versions >= 0.10 tack the _needmain attribute onto
+                # pyplot.show, and always set it to False, when in %pylab mode.
+                ipython_pylab = not pyplot.show._needmain
+            except AttributeError:
+                ipython_pylab = False
+            block = not ipython_pylab and not is_interactive()
+            # TODO: The above is a hack to get the WebAgg backend working with
+            # ipython's `%pylab` mode until proper integration is implemented.
+            if get_backend() == "WebAgg":
+                block = True
+        if block:
+            cls.mainloop()
+
+    # This method is the one actually exporting the required methods.
+
+    @staticmethod
+    def export(cls):
+        for name in ["required_interactive_framework",
+                     "backend_version",
+                     "FigureCanvas",
+                     "FigureManager",
+                     "new_figure_manager",
+                     "new_figure_manager_given_figure",
+                     "draw_if_interactive",
+                     "show"]:
+            setattr(sys.modules[cls.__module__], name, getattr(cls, name))
+
+        # For back-compatibility, generate a shim `Show` class.
+
+        class Show(ShowBase):
+            def mainloop(self):
+                return cls.mainloop()
+
+        setattr(sys.modules[cls.__module__], "Show", Show)
+        return cls
+
+
+class ShowBase(_Backend):
+    """
+    Simple base class to generate a show() callable in backends.
+
+    Subclass must override mainloop() method.
+    """
+
+    def __call__(self, block=None):
+        return self.show(block=block)

@@ -145,7 +145,6 @@ class Cell(Rectangle):
 class CustomCell(Cell):
     """
     A subclass of Cell where the sides may be visibly toggled.
-
     """
 
     _edges = 'BRTL'
@@ -155,9 +154,8 @@ class CustomCell(Cell):
                      'vertical':     'RL'
                      }
 
-    def __init__(self, *args, **kwargs):
-        visible_edges = kwargs.pop('visible_edges')
-        Cell.__init__(self, *args, **kwargs)
+    def __init__(self, *args, visible_edges, **kwargs):
+        super().__init__(*args, **kwargs)
         self.visible_edges = visible_edges
 
     @property
@@ -243,13 +241,13 @@ class Table(Artist):
 
         Artist.__init__(self)
 
-        if isinstance(loc, str) and loc not in self.codes:
-            warnings.warn('Unrecognized location %s. Falling back on '
-                          'bottom; valid locations are\n%s\t' %
-                          (loc, '\n\t'.join(self.codes)))
-            loc = 'bottom'
         if isinstance(loc, str):
-            loc = self.codes.get(loc, 1)
+            if loc not in self.codes:
+                warnings.warn('Unrecognized location %s. Falling back on '
+                              'bottom; valid locations are\n%s\t' %
+                              (loc, '\n\t'.join(self.codes)))
+                loc = 'bottom'
+            loc = self.codes[loc]
         self.set_figure(ax.figure)
         self._axes = ax
         self._loc = loc
@@ -499,9 +497,11 @@ class Table(Artist):
 
     def set_fontsize(self, size):
         """
-        Set the fontsize of the cell text
+        Set the font size, in points, of the cell text.
 
-        ACCEPTS: a float in points
+        Parameters
+        ----------
+        size : float
         """
 
         for cell in self._cells.values():

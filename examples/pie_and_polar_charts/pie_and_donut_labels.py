@@ -17,7 +17,7 @@ as well as with :meth:`annotations <matplotlib.axes.Axes.annotate>`.
 #
 # We can provide a function to the ``autopct`` argument, which will expand
 # automatic percentage labeling by showing absolute values; we calculate
-# the latter back from realtive data and the known sum of all values.
+# the latter back from relative data and the known sum of all values.
 #
 # We then create the pie and store the returned objects for later.
 # The first returned element of the returned tuple is a list of the wedges.
@@ -123,3 +123,20 @@ plt.show()
 # And here it is, the donut. Note however, that if we were to use this recipe,
 # the ingredients would suffice for around 6 donuts - producing one huge
 # donut is untested and might result in kitchen errors.
+
+
+#############################################################################
+#
+# ------------
+#
+# References
+# """"""""""
+#
+# The use of the following functions, methods, classes and modules is shown
+# in this example:
+
+import matplotlib
+matplotlib.axes.Axes.pie
+matplotlib.pyplot.pie
+matplotlib.axes.Axes.legend
+matplotlib.pyplot.legend

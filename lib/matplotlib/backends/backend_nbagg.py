@@ -6,7 +6,7 @@
 from base64 import b64encode
 import io
 import json
-import os
+import pathlib
 import uuid
 
 from IPython.display import display, Javascript, HTML
@@ -17,7 +17,7 @@ except ImportError:
     # Jupyter/IPython 3.x or earlier
     from IPython.kernel.comm import Comm
 
-from matplotlib import rcParams, is_interactive
+from matplotlib import is_interactive
 from matplotlib._pylab_helpers import Gcf
 from matplotlib.backend_bases import (
     _Backend, FigureCanvasBase, NavigationToolbar2)
@@ -111,11 +111,9 @@ class FigureManagerNbAgg(FigureManagerWebAgg):
         else:
             output = stream
         super().get_javascript(stream=output)
-        with io.open(os.path.join(
-                os.path.dirname(__file__),
-                "web_backend", 'js',
-                "nbagg_mpl.js"), encoding='utf8') as fd:
-            output.write(fd.read())
+        output.write((pathlib.Path(__file__).parent
+                      / "web_backend/js/nbagg_mpl.js")
+                     .read_text(encoding="utf-8"))
         if stream is None:
             return output.getvalue()
 

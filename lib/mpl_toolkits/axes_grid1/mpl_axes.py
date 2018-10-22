@@ -1,8 +1,3 @@
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
-import six
-
 import matplotlib.axes as maxes
 from matplotlib.artist import Artist
 from matplotlib.axis import XAxis, YAxis
@@ -36,8 +31,7 @@ class Axes(maxes.Axes):
                 return r
             elif isinstance(k, slice):
                 if k.start is None and k.stop is None and k.step is None:
-                    r = SimpleChainedObjects(list(six.itervalues(self)))
-                    return r
+                    return SimpleChainedObjects(list(self.values()))
                 else:
                     raise ValueError("Unsupported slice")
             else:
@@ -56,10 +50,9 @@ class Axes(maxes.Axes):
             left=SimpleAxisArtist(self.yaxis, 1, self.spines["left"]),
             right=SimpleAxisArtist(self.yaxis, 2, self.spines["right"]))
 
-    def _get_axislines(self):
+    @property
+    def axis(self):
         return self._axislines
-
-    axis = property(_get_axislines)
 
     def cla(self):
         super().cla()
@@ -80,23 +73,21 @@ class SimpleAxisArtist(Artist):
             raise ValueError("axis must be instance of XAxis or YAxis : %s is provided" % (axis,))
         Artist.__init__(self)
 
-
-    def _get_major_ticks(self):
+    @property
+    def major_ticks(self):
         tickline = "tick%dline" % self._axisnum
         return SimpleChainedObjects([getattr(tick, tickline)
                                      for tick in self._axis.get_major_ticks()])
 
-    def _get_major_ticklabels(self):
+    @property
+    def major_ticklabels(self):
         label = "label%d" % self._axisnum
         return SimpleChainedObjects([getattr(tick, label)
                                      for tick in self._axis.get_major_ticks()])
 
-    def _get_label(self):
+    @property
+    def label(self):
         return self._axis.label
-
-    major_ticks = property(_get_major_ticks)
-    major_ticklabels = property(_get_major_ticklabels)
-    label = property(_get_label)
 
     def set_visible(self, b):
         self.toggle(all=b)

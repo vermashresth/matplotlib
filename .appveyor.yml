@@ -8,11 +8,13 @@ branches:
   except:
     - /auto-backport-.*/
 
+clone_depth: 50
+
 environment:
 
   global:
     PYTHONIOENCODING: UTF-8
-    PYTEST_ARGS: -rawR --numprocesses=auto --timeout=300 --durations=25
+    PYTEST_ARGS: -raR --numprocesses=auto --timeout=300 --durations=25
                  --cov-report= --cov=lib -m "not network"
 
   matrix:
@@ -24,6 +26,9 @@ environment:
       TEST_ALL: "no"
     - PYTHON_VERSION: "3.6"
       CONDA_INSTALL_LOCN: "C:\\Miniconda36-x64"
+      TEST_ALL: "no"
+    - PYTHON_VERSION: "3.7"
+      CONDA_INSTALL_LOCN: "C:\\Miniconda37-x64"
       TEST_ALL: "no"
 
 # We always use a 64-bit machine, but can build x86 distributions
@@ -83,7 +88,7 @@ install:
   - del %LIBRARY_LIB%\z.lib
   - set MPLBASEDIRLIST=%CONDA_PREFIX%\Library\;.
   # enables the local freetype build
-  - copy ci\travis\setup.cfg .
+  - set MPLLOCALFREETYPE=1
   # Show the installed packages + versions
   - conda list
 
@@ -106,7 +111,7 @@ test_script:
   - python -c "import matplotlib as m; m.use('tkagg'); import matplotlib.pyplot as plt; print(plt.get_backend())"
   # tests
   - echo The following args are passed to pytest %PYTEST_ARGS%
-  - python tests.py %PYTEST_ARGS%
+  - pytest %PYTEST_ARGS%
 
 after_test:
   # After the tests were a success, build wheels with the static libs

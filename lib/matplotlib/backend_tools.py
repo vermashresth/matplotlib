@@ -25,7 +25,7 @@ import matplotlib.cbook as cbook
 
 class Cursors(object):
     """Simple namespace for cursor reference"""
-    HAND, POINTER, SELECT_REGION, MOVE, WAIT = list(range(5))
+    HAND, POINTER, SELECT_REGION, MOVE, WAIT = range(5)
 cursors = Cursors()
 
 # Views positions tool
@@ -41,11 +41,11 @@ class ToolBase(object):
 
     Attributes
     ----------
-    toolmanager: `matplotlib.backend_managers.ToolManager`
+    toolmanager : `matplotlib.backend_managers.ToolManager`
         ToolManager that controls this Tool
-    figure: `FigureCanvas`
+    figure : `FigureCanvas`
         Figure instance that is affected by this Tool
-    name: String
+    name : string
         Used as **Id** of the tool, has to be unique among tools of the same
         ToolManager
     """
@@ -106,7 +106,7 @@ class ToolBase(object):
 
         Parameters
         ----------
-        figure: `Figure`
+        figure : `Figure`
         """
         self._figure = figure
 
@@ -119,11 +119,11 @@ class ToolBase(object):
 
         Parameters
         ----------
-        event: `Event`
+        event : `Event`
             The Canvas event that caused this tool to be called
-        sender: object
+        sender : object
             Object that requested the tool to be triggered
-        data: object
+        data : object
             Extra data
         """
 
@@ -190,7 +190,6 @@ class ToolToggleBase(ToolBase):
 
         `trigger` calls this method when `toggled` is False
         """
-
         pass
 
     def disable(self, event=None):
@@ -206,7 +205,6 @@ class ToolToggleBase(ToolBase):
         * Another `ToolToggleBase` derived tool is triggered
           (from the same `ToolManager`)
         """
-
         pass
 
     @property
@@ -337,7 +335,7 @@ class ToolCursorPosition(ToolBase):
             except (ValueError, OverflowError):
                 pass
             else:
-                artists = [a for a in event.inaxes.mouseover_set
+                artists = [a for a in event.inaxes._mouseover_set
                            if a.contains(event) and a.get_visible()]
 
                 if artists:
@@ -460,9 +458,9 @@ class _ToolGridBase(ToolBase):
         Returns True/False if all grid lines are on or off, None if they are
         not all in the same state.
         """
-        if all(tick.gridOn for tick in ticks):
+        if all(tick.gridline.get_visible() for tick in ticks):
             return True
-        elif not any(tick.gridOn for tick in ticks):
+        elif not any(tick.gridline.get_visible() for tick in ticks):
             return False
         else:
             return None
@@ -1039,28 +1037,39 @@ class ToolHelpBase(ToolBase):
         keymaps = self.toolmanager.get_tool_keymap(name)
         return ", ".join(self.format_shortcut(keymap) for keymap in keymaps)
 
-    def _get_help_text(self):
+    def _get_help_entries(self):
         entries = []
         for name, tool in sorted(self.toolmanager.tools.items()):
             if not tool.description:
                 continue
-            entries.append(
-                "{}: {}\n\t{}".format(
-                    name, self._format_tool_keymap(name), tool.description))
+            entries.append((name, self._format_tool_keymap(name),
+                            tool.description))
+        return entries
+
+    def _get_help_text(self):
+        entries = self._get_help_entries()
+        entries = ["{}: {}\n\t{}".format(*entry) for entry in entries]
         return "\n".join(entries)
 
     def _get_help_html(self):
         fmt = "<tr><td>{}</td><td>{}</td><td>{}</td></tr>"
         rows = [fmt.format(
             "<b>Action</b>", "<b>Shortcuts</b>", "<b>Description</b>")]
-        for name, tool in sorted(self.toolmanager.tools.items()):
-            if not tool.description:
-                continue
-            rows.append(fmt.format(
-                name, self._format_tool_keymap(name), tool.description))
+        rows += [fmt.format(*row) for row in self._get_help_entries()]
         return ("<style>td {padding: 0px 4px}</style>"
                 "<table><thead>" + rows[0] + "</thead>"
                 "<tbody>".join(rows[1:]) + "</tbody></table>")
+
+
+class ToolCopyToClipboardBase(ToolBase):
+    """Tool to copy the figure to the clipboard"""
+
+    description = 'Copy the canvas figure to clipboard'
+    default_keymap = rcParams['keymap.copy']
+
+    def trigger(self, *args, **kwargs):
+        message = "Copy tool is not available"
+        self.toolmanager.message_event(message, self)
 
 
 default_tools = {'home': ToolHome, 'back': ToolBack, 'forward': ToolForward,
@@ -1081,6 +1090,7 @@ default_tools = {'home': ToolHome, 'back': ToolBack, 'forward': ToolForward,
                  'cursor': 'ToolSetCursor',
                  'rubberband': 'ToolRubberband',
                  'help': 'ToolHelp',
+                 'copy': 'ToolCopyToClipboard',
                  }
 """Default tools"""
 
@@ -1096,7 +1106,7 @@ def add_tools_to_manager(toolmanager, tools=default_tools):
 
     Parameters
     ----------
-    toolmanager: ToolManager
+    toolmanager : ToolManager
         `backend_managers.ToolManager` object that will get the tools added
     tools : {str: class_like}, optional
         The tools to add in a {name: tool} dict, see `add_tool` for more
@@ -1113,7 +1123,7 @@ def add_tools_to_container(container, tools=default_toolbar_tools):
 
     Parameters
     ----------
-    container: Container
+    container : Container
         `backend_bases.ToolContainerBase` object that will get the tools added
     tools : list, optional
         List in the form
