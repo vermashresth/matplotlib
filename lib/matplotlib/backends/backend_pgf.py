@@ -1,5 +1,6 @@
 import atexit
 import codecs
+import functools
 import logging
 import math
 import os
@@ -9,16 +10,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import warnings
 import weakref
 
+from PIL import Image
+
 import matplotlib as mpl
-from matplotlib import _png, cbook, font_manager as fm, __version__, rcParams
+from matplotlib import cbook, font_manager as fm, __version__, rcParams
 from matplotlib.backend_bases import (
     _Backend, FigureCanvasBase, FigureManagerBase, GraphicsContextBase,
     RendererBase)
 from matplotlib.backends.backend_mixed import MixedModeRenderer
-from matplotlib.cbook import is_writable_file_like
 from matplotlib.path import Path
 from matplotlib.figure import Figure
 from matplotlib._pylab_helpers import Gcf
@@ -26,15 +27,9 @@ from matplotlib._pylab_helpers import Gcf
 _log = logging.getLogger(__name__)
 
 
-###############################################################################
-
-
-@cbook.deprecated("3.0")
-def get_texcommand():
-    """Get chosen TeX system from rc."""
-    texsystem_options = ["xelatex", "lualatex", "pdflatex"]
-    texsystem = rcParams["pgf.texsystem"]
-    return texsystem if texsystem in texsystem_options else "xelatex"
+# Note: When formatting floating point values, it is important to use the
+# %f/{:f} format rather than %s/{} to avoid triggering scientific notation,
+# which is not recognized by TeX.
 
 
 def get_fontspec():
@@ -60,7 +55,7 @@ def get_fontspec():
 
 def get_preamble():
     """Get LaTeX preamble from rc."""
-    return "\n".join(rcParams["pgf.preamble"])
+    return rcParams["pgf.preamble"]
 
 ###############################################################################
 
@@ -77,10 +72,25 @@ mpl_in_to_pt = 1. / mpl_pt_to_in
 
 NO_ESCAPE = r"(?<!\\)(?:\\\\)*"
 re_mathsep = re.compile(NO_ESCAPE + r"\$")
-re_escapetext = re.compile(NO_ESCAPE + "([_^$%])")
-repl_escapetext = lambda m: "\\" + m.group(1)
-re_mathdefault = re.compile(NO_ESCAPE + r"(\\mathdefault)")
-repl_mathdefault = lambda m: m.group(0)[:-len(m.group(1))]
+
+
+@cbook.deprecated("3.2")
+def repl_escapetext(m):
+    return "\\" + m.group(1)
+
+
+@cbook.deprecated("3.2")
+def repl_mathdefault(m):
+    return m.group(0)[:-len(m.group(1))]
+
+
+_replace_escapetext = functools.partial(
+    # When the next character is _, ^, $, or % (not preceded by an escape),
+    # insert a backslash.
+    re.compile(NO_ESCAPE + "(?=[_^$%])").sub, "\\\\")
+_replace_mathdefault = functools.partial(
+    # Replace \mathdefault (when not preceded by an escape) by empty string.
+    re.compile(NO_ESCAPE + r"(\\mathdefault)").sub, "")
 
 
 def common_texification(text):
@@ -88,22 +98,19 @@ def common_texification(text):
     Do some necessary and/or useful substitutions for texts to be included in
     LaTeX documents.
     """
-
     # Sometimes, matplotlib adds the unknown command \mathdefault.
     # Not using \mathnormal instead since this looks odd for the latex cm font.
-    text = re_mathdefault.sub(repl_mathdefault, text)
-
+    text = _replace_mathdefault(text)
     # split text into normaltext and inline math parts
     parts = re_mathsep.split(text)
     for i, s in enumerate(parts):
         if not i % 2:
             # textmode replacements
-            s = re_escapetext.sub(repl_escapetext, s)
+            s = _replace_escapetext(s)
         else:
             # mathmode replacements
             s = r"\(\displaystyle %s\)" % s
         parts[i] = s
-
     return "".join(parts)
 
 
@@ -145,32 +152,20 @@ def _font_properties_str(prop):
 
 
 def make_pdf_to_png_converter():
-    """
-    Returns a function that converts a pdf file to a png file.
-    """
-
-    tools_available = []
-    # check for pdftocairo
-    try:
-        subprocess.check_output(["pdftocairo", "-v"], stderr=subprocess.STDOUT)
-        tools_available.append("pdftocairo")
-    except OSError:
-        pass
-    # check for ghostscript
-    gs, ver = mpl.checkdep_ghostscript()
-    if gs:
-        tools_available.append("gs")
-
-    # pick converter
-    if "pdftocairo" in tools_available:
+    """Returns a function that converts a pdf file to a png file."""
+    if shutil.which("pdftocairo"):
         def cairo_convert(pdffile, pngfile, dpi):
             cmd = ["pdftocairo", "-singlefile", "-png", "-r", "%d" % dpi,
                    pdffile, os.path.splitext(pngfile)[0]]
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         return cairo_convert
-    elif "gs" in tools_available:
+    try:
+        gs_info = mpl._get_executable_info("gs")
+    except mpl.ExecutableNotFoundError:
+        pass
+    else:
         def gs_convert(pdffile, pngfile, dpi):
-            cmd = [gs,
+            cmd = [gs_info.executable,
                    '-dQUIET', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-dNOPROMPT',
                    '-dUseCIEColor', '-dTextAlphaBits=4',
                    '-dGraphicsAlphaBits=4', '-dDOINTERPOLATE',
@@ -178,8 +173,7 @@ def make_pdf_to_png_converter():
                    '-r%d' % dpi, pdffile]
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         return gs_convert
-    else:
-        raise RuntimeError("No suitable pdf to png renderer found.")
+    raise RuntimeError("No suitable pdf to png renderer found.")
 
 
 class LatexError(Exception):
@@ -188,6 +182,7 @@ class LatexError(Exception):
         self.latex_output = latex_output
 
 
+@cbook.deprecated("3.1")
 class LatexManagerFactory:
     previous_instance = None
 
@@ -213,7 +208,7 @@ class LatexManager:
     """
     The LatexManager opens an instance of the LaTeX application for
     determining the metrics of text elements. The LaTeX environment can be
-    modified by setting fonts and/or a custem preamble in the rc parameters.
+    modified by setting fonts and/or a custom preamble in the rc parameters.
     """
     _unclean_instances = weakref.WeakSet()
 
@@ -224,13 +219,33 @@ class LatexManager:
         # Create LaTeX header with some content, else LaTeX will load some math
         # fonts later when we don't expect the additional output on stdout.
         # TODO: is this sufficient?
-        latex_header = [r"\documentclass{minimal}",
-                        latex_preamble,
-                        latex_fontspec,
-                        r"\begin{document}",
-                        r"text $math \mu$",  # force latex to load fonts now
-                        r"\typeout{pgf_backend_query_start}"]
+        latex_header = [
+            r"\documentclass{minimal}",
+            # Include TeX program name as a comment for cache invalidation.
+            # TeX does not allow this to be the first line.
+            r"% !TeX program = {}".format(rcParams["pgf.texsystem"]),
+            # Test whether \includegraphics supports interpolate option.
+            r"\usepackage{graphicx}",
+            latex_preamble,
+            latex_fontspec,
+            r"\begin{document}",
+            r"text $math \mu$",  # force latex to load fonts now
+            r"\typeout{pgf_backend_query_start}",
+        ]
         return "\n".join(latex_header)
+
+    @classmethod
+    def _get_cached_or_new(cls):
+        """
+        Return the previous LatexManager if the header and tex system did not
+        change, or a new instance otherwise.
+        """
+        return cls._get_cached_or_new_impl(cls._build_latex_header())
+
+    @classmethod
+    @functools.lru_cache(1)
+    def _get_cached_or_new_impl(cls, header):  # Helper for _get_cached_or_new.
+        return cls()
 
     @staticmethod
     def _cleanup_remaining_instances():
@@ -324,7 +339,7 @@ class LatexManager:
 
     def get_width_height_descent(self, text, prop):
         """
-        Get the width, total height and descent for a text typesetted by the
+        Get the width, total height and descent for a text typeset by the
         current LaTeX environment.
         """
 
@@ -367,6 +382,22 @@ class LatexManager:
         return w, h + o, o
 
 
+@functools.lru_cache(1)
+def _get_image_inclusion_command():
+    man = LatexManager._get_cached_or_new()
+    man._stdin_writeln(
+        r"\includegraphics[interpolate=true]{%s}"
+        # Don't mess with backslashes on Windows.
+        % cbook._get_data_path("images/matplotlib.png").as_posix())
+    try:
+        prompt = man._expect_prompt()
+        return r"\includegraphics"
+    except LatexError:
+        # Discard the broken manager.
+        LatexManager._get_cached_or_new_impl.cache_clear()
+        return r"\pgfimage"
+
+
 class RendererPgf(RendererBase):
 
     def __init__(self, figure, fh, dummy=False):
@@ -380,33 +411,37 @@ class RendererPgf(RendererBase):
             Matplotlib figure to initialize height, width and dpi from.
         fh : file-like
             File handle for the output of the drawing commands.
-
         """
+
         RendererBase.__init__(self)
         self.dpi = figure.dpi
         self.fh = fh
         self.figure = figure
         self.image_counter = 0
 
-        # get LatexManager instance
-        self.latexManager = LatexManagerFactory.get_latex_manager()
+        self._latexManager = LatexManager._get_cached_or_new()  # deprecated
 
         if dummy:
             # dummy==True deactivate all methods
-            nop = lambda *args, **kwargs: None
             for m in RendererPgf.__dict__:
                 if m.startswith("draw_"):
-                    self.__dict__[m] = nop
+                    self.__dict__[m] = lambda *args, **kwargs: None
         else:
             # if fh does not belong to a filename, deactivate draw_image
             if not hasattr(fh, 'name') or not os.path.exists(fh.name):
-                warnings.warn("streamed pgf-code does not support raster "
-                              "graphics, consider using the pgf-to-pdf option",
-                              UserWarning, stacklevel=2)
+                cbook._warn_external("streamed pgf-code does not support "
+                                     "raster graphics, consider using the "
+                                     "pgf-to-pdf option", UserWarning)
                 self.__dict__["draw_image"] = lambda *args, **kwargs: None
+
+    @cbook.deprecated("3.2")
+    def latexManager(self):
+        return self._latexManager
 
     def draw_markers(self, gc, marker_path, marker_trans, path, trans,
                      rgbFace=None):
+        # docstring inherited
+
         writeln(self.fh, r"\begin{pgfscope}")
 
         # convert from display units to in
@@ -438,6 +473,7 @@ class RendererPgf(RendererBase):
         writeln(self.fh, r"\end{pgfscope}")
 
     def draw_path(self, gc, path, transform, rgbFace=None):
+        # docstring inherited
         writeln(self.fh, r"\begin{pgfscope}")
         # draw the path
         self._print_pgf_clip(gc)
@@ -477,7 +513,7 @@ class RendererPgf(RendererBase):
                 path.get_extents(transform).get_points()
             xmin, xmax = f * xmin, f * xmax
             ymin, ymax = f * ymin, f * ymax
-            repx, repy = int(math.ceil(xmax-xmin)), int(math.ceil(ymax-ymin))
+            repx, repy = math.ceil(xmax - xmin), math.ceil(ymax - ymin)
             writeln(self.fh,
                     r"\pgfsys@transformshift{%fin}{%fin}" % (xmin, ymin))
             for iy in range(repy):
@@ -609,29 +645,25 @@ class RendererPgf(RendererBase):
         writeln(self.fh, r"\pgfusepath{%s}" % ",".join(actions))
 
     def option_scale_image(self):
-        """
-        pgf backend supports affine transform of image.
-        """
+        # docstring inherited
         return True
 
     def option_image_nocomposite(self):
-        """
-        return whether to generate a composite image from multiple images on
-        a set of axes
-        """
+        # docstring inherited
         return not rcParams['image.composite_image']
 
     def draw_image(self, gc, x, y, im, transform=None):
+        # docstring inherited
+
         h, w = im.shape[:2]
         if w == 0 or h == 0:
             return
 
         # save the images to png files
-        path = os.path.dirname(self.fh.name)
-        fname = os.path.splitext(os.path.basename(self.fh.name))[0]
-        fname_img = "%s-img%d.png" % (fname, self.image_counter)
+        path = pathlib.Path(self.fh.name)
+        fname_img = "%s-img%d.png" % (path.stem, self.image_counter)
+        Image.fromarray(im[::-1]).save(path.parent / fname_img)
         self.image_counter += 1
-        _png.write_png(im[::-1], os.path.join(path, fname_img))
 
         # reference the image in the pgf picture
         writeln(self.fh, r"\begin{pgfscope}")
@@ -651,14 +683,18 @@ class RendererPgf(RendererBase):
         interp = str(transform is None).lower()  # interpolation in PDF reader
         writeln(self.fh,
                 r"\pgftext[left,bottom]"
-                r"{\pgfimage[interpolate=%s,width=%fin,height=%fin]{%s}}" %
-                (interp, w, h, fname_img))
+                r"{%s[interpolate=%s,width=%fin,height=%fin]{%s}}" %
+                (_get_image_inclusion_command(),
+                 interp, w, h, fname_img))
         writeln(self.fh, r"\end{pgfscope}")
 
     def draw_tex(self, gc, x, y, s, prop, angle, ismath="TeX!", mtext=None):
+        # docstring inherited
         self.draw_text(gc, x, y, s, prop, angle, ismath, mtext)
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
+        # docstring inherited
+
         # prepare string for tex
         s = common_texification(s)
         prop_cmds = _font_properties_str(prop)
@@ -676,7 +712,7 @@ class RendererPgf(RendererBase):
         writeln(self.fh, r"\pgfsetfillcolor{textcolor}")
         s = r"\color{textcolor}" + s
 
-        f = 1.0 / self.figure.dpi
+        dpi = self.figure.dpi
         text_args = []
         if mtext and (
                 (angle == 0 or
@@ -685,21 +721,19 @@ class RendererPgf(RendererBase):
             # if text anchoring can be supported, get the original coordinates
             # and add alignment information
             pos = mtext.get_unitless_position()
-            x, y = mtext.get_transform().transform_point(pos)
-            text_args.append("x=%fin" % (x * f))
-            text_args.append("y=%fin" % (y * f))
-
+            x, y = mtext.get_transform().transform(pos)
             halign = {"left": "left", "right": "right", "center": ""}
             valign = {"top": "top", "bottom": "bottom",
                       "baseline": "base", "center": ""}
-            text_args.append(halign[mtext.get_horizontalalignment()])
-            text_args.append(valign[mtext.get_verticalalignment()])
+            text_args.extend([
+                f"x={x/dpi:f}in",
+                f"y={y/dpi:f}in",
+                halign[mtext.get_horizontalalignment()],
+                valign[mtext.get_verticalalignment()],
+            ])
         else:
-            # if not, use the text layout provided by matplotlib
-            text_args.append("x=%fin" % (x * f))
-            text_args.append("y=%fin" % (y * f))
-            text_args.append("left")
-            text_args.append("base")
+            # if not, use the text layout provided by Matplotlib.
+            text_args.append(f"x={x/dpi:f}in, y={y/dpi:f}in, left, base")
 
         if angle != 0:
             text_args.append("rotate=%f" % angle)
@@ -708,11 +742,14 @@ class RendererPgf(RendererBase):
         writeln(self.fh, r"\end{pgfscope}")
 
     def get_text_width_height_descent(self, s, prop, ismath):
+        # docstring inherited
+
         # check if the math is supposed to be displaystyled
         s = common_texification(s)
 
         # get text metrics in units of latex pt, convert to display units
-        w, h, d = self.latexManager.get_width_height_descent(s, prop)
+        w, h, d = (LatexManager._get_cached_or_new()
+                   .get_width_height_descent(s, prop))
         # TODO: this should be latex_pt_to_in instead of mpl_pt_to_in
         # but having a little bit more space around the text looks better,
         # plus the bounding box reported by LaTeX is VERY narrow
@@ -720,15 +757,20 @@ class RendererPgf(RendererBase):
         return w * f, h * f, d * f
 
     def flipy(self):
+        # docstring inherited
         return False
 
     def get_canvas_width_height(self):
-        return self.figure.get_figwidth(), self.figure.get_figheight()
+        # docstring inherited
+        return (self.figure.get_figwidth() * self.dpi,
+                self.figure.get_figheight() * self.dpi)
 
     def points_to_pixels(self, points):
+        # docstring inherited
         return points * mpl_pt_to_in * self.dpi
 
     def new_gc(self):
+        # docstring inherited
         return GraphicsContextPgf()
 
 
@@ -748,10 +790,10 @@ class TmpDirCleaner:
     @staticmethod
     def cleanup_remaining_tmpdirs():
         for tmpdir in TmpDirCleaner.remaining_tmpdirs:
+            error_message = "error deleting tmp directory {}".format(tmpdir)
             shutil.rmtree(
                 tmpdir,
-                onerror=lambda *args: print("error deleting tmp directory %s"
-                                            % tmpdir, file=sys.stderr))
+                onerror=lambda *args: _log.error(error_message))
 
 
 class FigureCanvasPgf(FigureCanvasBase):
@@ -762,6 +804,7 @@ class FigureCanvasPgf(FigureCanvasBase):
     def get_default_filetype(self):
         return 'pdf'
 
+    @cbook._delete_parameter("3.2", "dryrun")
     def _print_pgf_to_fh(self, fh, *args,
                          dryrun=False, bbox_inches_restore=None, **kwargs):
         if dryrun:
@@ -777,10 +820,17 @@ class FigureCanvasPgf(FigureCanvasBase):
 %% Make sure the required packages are loaded in your preamble
 %%   \\usepackage{pgf}
 %%
+%% and, on pdftex
+%%   \\usepackage[utf8]{inputenc}\\DeclareUnicodeCharacter{2212}{-}
+%%
+%% or, on luatex and xetex
+%%   \\usepackage{unicode-math}
+%%
 %% Figures using additional raster images can only be included by \\input if
 %% they are in the same directory as the main LaTeX file. For loading figures
 %% from other directories you can use the `import` package
 %%   \\usepackage{import}
+%%
 %% and then include the figures with
 %%   \\import{<path to file>}{<filename>.pgf}
 %%
@@ -828,16 +878,10 @@ class FigureCanvasPgf(FigureCanvasBase):
         if kwargs.get("dryrun", False):
             self._print_pgf_to_fh(None, *args, **kwargs)
             return
-
-        # figure out where the pgf is to be written to
-        if isinstance(fname_or_fh, str):
-            with open(fname_or_fh, "w", encoding="utf-8") as fh:
-                self._print_pgf_to_fh(fh, *args, **kwargs)
-        elif is_writable_file_like(fname_or_fh):
-            fh = codecs.getwriter("utf-8")(fname_or_fh)
-            self._print_pgf_to_fh(fh, *args, **kwargs)
-        else:
-            raise ValueError("filename must be a path")
+        with cbook.open_file_cm(fname_or_fh, "w", encoding="utf-8") as file:
+            if not cbook.file_requires_unicode(file):
+                file = codecs.getwriter("utf-8")(file)
+            self._print_pgf_to_fh(file, *args, **kwargs)
 
     def _print_pdf_to_fh(self, fh, *args, **kwargs):
         w, h = self.figure.get_figwidth(), self.figure.get_figheight()
@@ -882,21 +926,12 @@ class FigureCanvasPgf(FigureCanvasBase):
                 TmpDirCleaner.add(tmpdir)
 
     def print_pdf(self, fname_or_fh, *args, **kwargs):
-        """
-        Use LaTeX to compile a Pgf generated figure to PDF.
-        """
+        """Use LaTeX to compile a Pgf generated figure to PDF."""
         if kwargs.get("dryrun", False):
             self._print_pgf_to_fh(None, *args, **kwargs)
             return
-
-        # figure out where the pdf is to be written to
-        if isinstance(fname_or_fh, str):
-            with open(fname_or_fh, "wb") as fh:
-                self._print_pdf_to_fh(fh, *args, **kwargs)
-        elif is_writable_file_like(fname_or_fh):
-            self._print_pdf_to_fh(fname_or_fh, *args, **kwargs)
-        else:
-            raise ValueError("filename must be a path or a file-like object")
+        with cbook.open_file_cm(fname_or_fh, "wb") as file:
+            self._print_pdf_to_fh(file, *args, **kwargs)
 
     def _print_png_to_fh(self, fh, *args, **kwargs):
         converter = make_pdf_to_png_converter()
@@ -919,20 +954,12 @@ class FigureCanvasPgf(FigureCanvasBase):
                 TmpDirCleaner.add(tmpdir)
 
     def print_png(self, fname_or_fh, *args, **kwargs):
-        """
-        Use LaTeX to compile a pgf figure to pdf and convert it to png.
-        """
+        """Use LaTeX to compile a pgf figure to pdf and convert it to png."""
         if kwargs.get("dryrun", False):
             self._print_pgf_to_fh(None, *args, **kwargs)
             return
-
-        if isinstance(fname_or_fh, str):
-            with open(fname_or_fh, "wb") as fh:
-                self._print_png_to_fh(fh, *args, **kwargs)
-        elif is_writable_file_like(fname_or_fh):
-            self._print_png_to_fh(fname_or_fh, *args, **kwargs)
-        else:
-            raise ValueError("filename must be a path or a file-like object")
+        with cbook.open_file_cm(fname_or_fh, "wb") as file:
+            self._print_png_to_fh(file, *args, **kwargs)
 
     def get_renderer(self):
         return RendererPgf(self.figure, None, dummy=True)
@@ -962,7 +989,6 @@ class PdfPages:
 
     Examples
     --------
-
     >>> import matplotlib.pyplot as plt
     >>> # Initialize:
     >>> with PdfPages('foo.pdf') as pdf:
@@ -990,8 +1016,7 @@ class PdfPages:
 
         Parameters
         ----------
-
-        filename : str
+        filename : str or path-like
             Plots using :meth:`PdfPages.savefig` will be written to a file at
             this location. Any older file with the same name is overwritten.
         keep_empty : bool, optional
@@ -1075,7 +1100,7 @@ class PdfPages:
     def close(self):
         """
         Finalize this object, running LaTeX in a temporary directory
-        and moving the final pdf file to `filename`.
+        and moving the final pdf file to *filename*.
         """
         self._file.write(rb'\end{document}\n')
         self._file.close()
@@ -1109,7 +1134,6 @@ class PdfPages:
 
         Parameters
         ----------
-
         figure : :class:`~matplotlib.figure.Figure` or int, optional
             Specifies what figure is saved to file. If not specified, the
             active figure is saved. If a :class:`~matplotlib.figure.Figure`

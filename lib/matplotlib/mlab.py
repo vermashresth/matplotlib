@@ -7,54 +7,55 @@ spectral computations.
 Spectral functions
 -------------------
 
-:func:`cohere`
+`cohere`
     Coherence (normalized cross spectral density)
 
-:func:`csd`
+`csd`
     Cross spectral density using Welch's average periodogram
 
-:func:`detrend`
+`detrend`
     Remove the mean or best fit line from an array
 
-:func:`psd`
+`psd`
     Power spectral density using Welch's average periodogram
 
-:func:`specgram`
+`specgram`
     Spectrogram (spectrum over segments of time)
 
-:func:`complex_spectrum`
+`complex_spectrum`
     Return the complex-valued frequency spectrum of a signal
 
-:func:`magnitude_spectrum`
+`magnitude_spectrum`
     Return the magnitude of the frequency spectrum of a signal
 
-:func:`angle_spectrum`
+`angle_spectrum`
     Return the angle (wrapped phase) of the frequency spectrum of a signal
 
-:func:`phase_spectrum`
+`phase_spectrum`
     Return the phase (unwrapped angle) of the frequency spectrum of a signal
 
-:func:`detrend_mean`
+`detrend_mean`
     Remove the mean from a line.
 
-:func:`detrend_linear`
+`detrend_linear`
     Remove the best fit line from a line.
 
-:func:`detrend_none`
+`detrend_none`
     Return the original line.
 
-:func:`stride_windows`
+`stride_windows`
     Get all windows in an array in a memory-efficient manner
 
-:func:`stride_repeat`
+`stride_repeat`
     Repeat an array in a memory-efficient manner
 
-:func:`apply_window`
+`apply_window`
     Apply a window along a given axis
 """
 
 import csv
-import warnings
+import inspect
+from numbers import Number
 
 import numpy as np
 
@@ -68,8 +69,7 @@ def window_hanning(x):
 
     See Also
     --------
-    :func:`window_none`
-        :func:`window_none` is another window algorithm.
+    window_none : Another window algorithm.
     '''
     return np.hanning(len(x))*x
 
@@ -80,12 +80,12 @@ def window_none(x):
 
     See Also
     --------
-    :func:`window_hanning`
-        :func:`window_hanning` is another window algorithm.
+    window_hanning : Another window algorithm.
     '''
     return x
 
 
+@cbook.deprecated("3.2")
 def apply_window(x, window, axis=0, return_window=None):
     '''
     Apply the given window to the given 1D or 2D array along the given axis.
@@ -151,11 +151,11 @@ def detrend(x, key=None, axis=None):
     x : array or sequence
         Array or sequence containing the data.
 
-    key : [ 'default' | 'constant' | 'mean' | 'linear' | 'none'] or function
+    key : {'default', 'constant', 'mean', 'linear', 'none'} or function
         Specifies the detrend algorithm to use. 'default' is 'mean', which is
-        the same as :func:`detrend_mean`. 'constant' is the same. 'linear' is
-        the same as :func:`detrend_linear`. 'none' is the same as
-        :func:`detrend_none`. The default is 'mean'. See the corresponding
+        the same as `detrend_mean`. 'constant' is the same. 'linear' is
+        the same as `detrend_linear`. 'none' is the same as
+        `detrend_none`. The default is 'mean'. See the corresponding
         functions for more details regarding the algorithms. Can also be a
         function that carries out the detrend operation.
 
@@ -164,14 +164,9 @@ def detrend(x, key=None, axis=None):
 
     See Also
     --------
-    :func:`detrend_mean`
-        :func:`detrend_mean` implements the 'mean' algorithm.
-
-    :func:`detrend_linear`
-        :func:`detrend_linear` implements the 'linear' algorithm.
-
-    :func:`detrend_none`
-        :func:`detrend_none` implements the 'none' algorithm.
+    detrend_mean : Implementation of the 'mean' algorithm.
+    detrend_linear : Implementation of the 'linear' algorithm.
+    detrend_none : Implementation of the 'none' algorithm.
     '''
     if key is None or key in ['constant', 'mean', 'default']:
         return detrend(x, key=detrend_mean, axis=axis)
@@ -179,30 +174,22 @@ def detrend(x, key=None, axis=None):
         return detrend(x, key=detrend_linear, axis=axis)
     elif key == 'none':
         return detrend(x, key=detrend_none, axis=axis)
-    elif isinstance(key, str):
-        raise ValueError("Unknown value for key %s, must be one of: "
-                         "'default', 'constant', 'mean', "
-                         "'linear', or a function" % key)
-
-    if not callable(key):
-        raise ValueError("Unknown value for key %s, must be one of: "
-                         "'default', 'constant', 'mean', "
-                         "'linear', or a function" % key)
-
-    x = np.asarray(x)
-
-    if axis is not None and axis+1 > x.ndim:
-        raise ValueError('axis(=%s) out of bounds' % axis)
-
-    if (axis is None and x.ndim == 0) or (not axis and x.ndim == 1):
-        return key(x)
-
-    # try to use the 'axis' argument if the function supports it,
-    # otherwise use apply_along_axis to do it
-    try:
-        return key(x, axis=axis)
-    except TypeError:
-        return np.apply_along_axis(key, axis=axis, arr=x)
+    elif callable(key):
+        x = np.asarray(x)
+        if axis is not None and axis + 1 > x.ndim:
+            raise ValueError(f'axis(={axis}) out of bounds')
+        if (axis is None and x.ndim == 0) or (not axis and x.ndim == 1):
+            return key(x)
+        # try to use the 'axis' argument if the function supports it,
+        # otherwise use apply_along_axis to do it
+        try:
+            return key(x, axis=axis)
+        except TypeError:
+            return np.apply_along_axis(key, axis=axis, arr=x)
+    else:
+        raise ValueError(
+            f"Unknown value for key: {key!r}, must be one of: 'default', "
+            f"'constant', 'mean', 'linear', or a function")
 
 
 @cbook.deprecated("3.1", alternative="detrend_mean")
@@ -222,9 +209,7 @@ def demean(x, axis=0):
 
     See Also
     --------
-    :func:`detrend_mean`
-        This function is the same as :func:`detrend_mean` except for the
-        default *axis*.
+    detrend_mean : Same as `demean` except for the default *axis*.
     '''
     return detrend_mean(x, axis=axis)
 
@@ -245,18 +230,9 @@ def detrend_mean(x, axis=None):
 
     See Also
     --------
-    :func:`demean`
-        This function is the same as :func:`demean` except for the default
-        *axis*.
-
-    :func:`detrend_linear`
-
-    :func:`detrend_none`
-        :func:`detrend_linear` and :func:`detrend_none` are other detrend
-        algorithms.
-
-    :func:`detrend`
-        :func:`detrend` is a wrapper around all the detrend algorithms.
+    detrend_linear : Another detrend algorithm.
+    detrend_none : Another detrend algorithm.
+    detrend : A wrapper around all the detrend algorithms.
     '''
     x = np.asarray(x)
 
@@ -281,14 +257,9 @@ def detrend_none(x, axis=None):
 
     See Also
     --------
-    :func:`detrend_mean`
-
-    :func:`detrend_linear`
-        :func:`detrend_mean` and :func:`detrend_linear` are other detrend
-        algorithms.
-
-    :func:`detrend`
-        :func:`detrend` is a wrapper around all the detrend algorithms.
+    detrend_mean : Another detrend algorithm.
+    detrend_linear : Another detrend algorithm.
+    detrend : A wrapper around all the detrend algorithms.
     '''
     return x
 
@@ -308,14 +279,9 @@ def detrend_linear(y):
 
     See Also
     --------
-    :func:`detrend_mean`
-
-    :func:`detrend_none`
-        :func:`detrend_mean` and :func:`detrend_none` are other detrend
-        algorithms.
-
-    :func:`detrend`
-        :func:`detrend` is a wrapper around all the detrend algorithms.
+    detrend_mean : Another detrend algorithm.
+    detrend_none : Another detrend algorithm.
+    detrend : A wrapper around all the detrend algorithms.
     '''
     # This is faster than an algorithm based on linalg.lstsq.
     y = np.asarray(y)
@@ -404,6 +370,7 @@ def stride_windows(x, n, noverlap=None, axis=0):
     return np.lib.stride_tricks.as_strided(x, shape=shape, strides=strides)
 
 
+@cbook.deprecated("3.2")
 def stride_repeat(x, n, axis=0):
     '''
     Repeat the values in an array in a memory-efficient manner.  Array x is
@@ -491,10 +458,9 @@ def _spectral_helper(x, y=None, NFFT=None, Fs=None, detrend_func=None,
 
     if mode is None or mode == 'default':
         mode = 'psd'
-    elif mode not in ['psd', 'complex', 'magnitude', 'angle', 'phase']:
-        raise ValueError("Unknown value for mode %s, must be one of: "
-                         "'default', 'psd', 'complex', "
-                         "'magnitude', 'angle', 'phase'" % mode)
+    cbook._check_in_list(
+        ['default', 'psd', 'complex', 'magnitude', 'angle', 'phase'],
+        mode=mode)
 
     if not same_data and mode != 'psd':
         raise ValueError("x and y must be equal if mode is not 'psd'")
@@ -510,19 +476,17 @@ def _spectral_helper(x, y=None, NFFT=None, Fs=None, detrend_func=None,
             sides = 'twosided'
         else:
             sides = 'onesided'
-    elif sides not in ['onesided', 'twosided']:
-        raise ValueError("Unknown value for sides %s, must be one of: "
-                         "'default', 'onesided', or 'twosided'" % sides)
+    cbook._check_in_list(['default', 'onesided', 'twosided'], sides=sides)
 
     # zero pad x and y up to NFFT if they are shorter than NFFT
     if len(x) < NFFT:
         n = len(x)
-        x = np.resize(x, (NFFT,))
+        x = np.resize(x, NFFT)
         x[n:] = 0
 
     if not same_data and len(y) < NFFT:
         n = len(y)
-        y = np.resize(y, (NFFT,))
+        y = np.resize(y, NFFT)
         y[n:] = 0
 
     if pad_to is None:
@@ -548,10 +512,15 @@ def _spectral_helper(x, y=None, NFFT=None, Fs=None, detrend_func=None,
             numFreqs = pad_to//2 + 1
         scaling_factor = 2.
 
+    if not np.iterable(window):
+        window = window(np.ones(NFFT, x.dtype))
+    if len(window) != NFFT:
+        raise ValueError(
+            "The window length must match the data's first dimension")
+
     result = stride_windows(x, NFFT, noverlap, axis=0)
     result = detrend(result, detrend_func, axis=0)
-    result, windowVals = apply_window(result, window, axis=0,
-                                      return_window=True)
+    result = result * window.reshape((-1, 1))
     result = np.fft.fft(result, n=pad_to, axis=0)[:numFreqs, :]
     freqs = np.fft.fftfreq(pad_to, 1/Fs)[:numFreqs]
 
@@ -559,18 +528,18 @@ def _spectral_helper(x, y=None, NFFT=None, Fs=None, detrend_func=None,
         # if same_data is False, mode must be 'psd'
         resultY = stride_windows(y, NFFT, noverlap)
         resultY = detrend(resultY, detrend_func, axis=0)
-        resultY = apply_window(resultY, window, axis=0)
+        resultY = resultY * window.reshape((-1, 1))
         resultY = np.fft.fft(resultY, n=pad_to, axis=0)[:numFreqs, :]
         result = np.conj(result) * resultY
     elif mode == 'psd':
         result = np.conj(result) * result
     elif mode == 'magnitude':
-        result = np.abs(result) / np.abs(windowVals).sum()
+        result = np.abs(result) / np.abs(window).sum()
     elif mode == 'angle' or mode == 'phase':
         # we unwrap the phase later to handle the onesided vs. twosided case
         result = np.angle(result)
     elif mode == 'complex':
-        result /= np.abs(windowVals).sum()
+        result /= np.abs(window).sum()
 
     if mode == 'psd':
 
@@ -594,10 +563,10 @@ def _spectral_helper(x, y=None, NFFT=None, Fs=None, detrend_func=None,
             result /= Fs
             # Scale the spectrum by the norm of the window to compensate for
             # windowing loss; see Bendat & Piersol Sec 11.5.2.
-            result /= (np.abs(windowVals)**2).sum()
+            result /= (np.abs(window)**2).sum()
         else:
             # In this case, preserve power in the segment, not amplitude
-            result /= np.abs(windowVals).sum()**2
+            result /= np.abs(window).sum()**2
 
     t = np.arange(NFFT/2, len(x) - NFFT/2 + 1, NFFT - noverlap)/Fs
 
@@ -624,9 +593,7 @@ def _single_spectrum_helper(x, mode, Fs=None, window=None, pad_to=None,
     complex, magnitude, angle, and phase spectrums.
     It is *NOT* meant to be used outside of mlab and may change at any time.
     '''
-    if mode is None or mode == 'psd' or mode == 'default':
-        raise ValueError('_single_spectrum_helper does not work with %s mode'
-                         % mode)
+    cbook._check_in_list(['complex', 'magnitude', 'angle', 'phase'], mode=mode)
 
     if pad_to is None:
         pad_to = len(x)
@@ -647,21 +614,19 @@ def _single_spectrum_helper(x, mode, Fs=None, window=None, pad_to=None,
 
 
 # Split out these keyword docs so that they can be used elsewhere
-docstring.interpd.update(Spectral=cbook.dedent("""
+docstring.interpd.update(Spectral=inspect.cleandoc("""
     Fs : scalar
         The sampling frequency (samples per time unit).  It is used
         to calculate the Fourier frequencies, freqs, in cycles per time
         unit. The default value is 2.
 
     window : callable or ndarray
-        A function or a vector of length *NFFT*. To create window
-        vectors see :func:`window_hanning`, :func:`window_none`,
-        :func:`numpy.blackman`, :func:`numpy.hamming`,
-        :func:`numpy.bartlett`, :func:`scipy.signal`,
-        :func:`scipy.signal.get_window`, etc. The default is
-        :func:`window_hanning`.  If a function is passed as the
-        argument, it must take a data segment as an argument and
-        return the windowed version of the segment.
+        A function or a vector of length *NFFT*.  To create window vectors see
+        `window_hanning`, `window_none`, `numpy.blackman`, `numpy.hamming`,
+        `numpy.bartlett`, `scipy.signal`, `scipy.signal.get_window`, etc.  The
+        default is `window_hanning`.  If a function is passed as the argument,
+        it must take a data segment as an argument and return the windowed
+        version of the segment.
 
     sides : {'default', 'onesided', 'twosided'}
         Specifies which sides of the spectrum to return.  Default gives the
@@ -671,7 +636,7 @@ docstring.interpd.update(Spectral=cbook.dedent("""
 """))
 
 
-docstring.interpd.update(Single_Spectrum=cbook.dedent("""
+docstring.interpd.update(Single_Spectrum=inspect.cleandoc("""
     pad_to : int
         The number of points to which the data segment is padded when
         performing the FFT.  While not increasing the actual resolution of
@@ -683,7 +648,7 @@ docstring.interpd.update(Single_Spectrum=cbook.dedent("""
 """))
 
 
-docstring.interpd.update(PSD=cbook.dedent("""
+docstring.interpd.update(PSD=inspect.cleandoc("""
     pad_to : int
         The number of points to which the data segment is padded when
         performing the FFT.  This can be different from *NFFT*, which
@@ -700,19 +665,15 @@ docstring.interpd.update(PSD=cbook.dedent("""
         This should *NOT* be used to get zero padding, or the scaling of the
         result will be incorrect. Use *pad_to* for this instead.
 
-    detrend : {'default', 'constant', 'mean', 'linear', 'none'} or callable
-        The function applied to each segment before fft-ing,
-        designed to remove the mean or linear trend.  Unlike in
-        MATLAB, where the *detrend* parameter is a vector, in
-        matplotlib is it a function.  The :mod:`~matplotlib.mlab`
-        module defines :func:`~matplotlib.mlab.detrend_none`,
-        :func:`~matplotlib.mlab.detrend_mean`, and
-        :func:`~matplotlib.mlab.detrend_linear`, but you can use
-        a custom function as well.  You can also use a string to choose
-        one of the functions.  'default', 'constant', and 'mean' call
-        :func:`~matplotlib.mlab.detrend_mean`.  'linear' calls
-        :func:`~matplotlib.mlab.detrend_linear`.  'none' calls
-        :func:`~matplotlib.mlab.detrend_none`.
+    detrend : {'none', 'mean', 'linear'} or callable, default 'none'
+        The function applied to each segment before fft-ing, designed to
+        remove the mean or linear trend.  Unlike in MATLAB, where the
+        *detrend* parameter is a vector, in Matplotlib is it a function.
+        The :mod:`~matplotlib.mlab` module defines `.detrend_none`,
+        `.detrend_mean`, and `.detrend_linear`, but you can use a custom
+        function as well.  You can also use a string to choose one of the
+        functions: 'none' calls `.detrend_none`. 'mean' calls `.detrend_mean`.
+        'linear' calls `.detrend_linear`.
 
     scale_by_freq : bool, optional
         Specifies whether the resulting density values should be scaled
@@ -727,12 +688,6 @@ def psd(x, NFFT=None, Fs=None, detrend=None, window=None,
         noverlap=None, pad_to=None, sides=None, scale_by_freq=None):
     r"""
     Compute the power spectral density.
-
-    Call signature::
-
-        psd(x, NFFT=256, Fs=2, detrend=mlab.detrend_none,
-            window=mlab.window_hanning, noverlap=0, pad_to=None,
-            sides='default', scale_by_freq=None)
 
     The power spectral density :math:`P_{xx}` by Welch's average
     periodogram method.  The vector *x* is divided into *NFFT* length
@@ -771,16 +726,13 @@ def psd(x, NFFT=None, Fs=None, detrend=None, window=None,
 
     See Also
     --------
-    :func:`specgram`
-        :func:`specgram` differs in the default overlap; in not returning the
-        mean of the segment periodograms; and in returning the times of the
-        segments.
+    specgram
+        `specgram` differs in the default overlap; in not returning the mean of
+        the segment periodograms; and in returning the times of the segments.
 
-    :func:`magnitude_spectrum`
-        :func:`magnitude_spectrum` returns the magnitude spectrum.
+    magnitude_spectrum : returns the magnitude spectrum.
 
-    :func:`csd`
-        :func:`csd` returns the spectral density between two signals.
+    csd : returns the spectral density between two signals.
     """
     Pxx, freqs = csd(x=x, y=None, NFFT=NFFT, Fs=Fs, detrend=detrend,
                      window=window, noverlap=noverlap, pad_to=pad_to,
@@ -793,12 +745,6 @@ def csd(x, y, NFFT=None, Fs=None, detrend=None, window=None,
         noverlap=None, pad_to=None, sides=None, scale_by_freq=None):
     """
     Compute the cross-spectral density.
-
-    Call signature::
-
-        csd(x, y, NFFT=256, Fs=2, detrend=mlab.detrend_none,
-            window=mlab.window_hanning, noverlap=0, pad_to=None,
-            sides='default', scale_by_freq=None)
 
     The cross spectral density :math:`P_{xy}` by Welch's average
     periodogram method.  The vectors *x* and *y* are divided into
@@ -840,8 +786,7 @@ def csd(x, y, NFFT=None, Fs=None, detrend=None, window=None,
 
     See Also
     --------
-    :func:`psd`
-        :func:`psd` is the equivalent to setting y=x.
+    psd : equivalent to setting ``y = x``.
     """
     if NFFT is None:
         NFFT = 256
@@ -886,19 +831,14 @@ def complex_spectrum(x, Fs=None, window=None, pad_to=None,
 
     See Also
     --------
-    :func:`magnitude_spectrum`
-        :func:`magnitude_spectrum` returns the absolute value of this function.
-
-    :func:`angle_spectrum`
-        :func:`angle_spectrum` returns the angle of this function.
-
-    :func:`phase_spectrum`
-        :func:`phase_spectrum` returns the phase (unwrapped angle) of this
-        function.
-
-    :func:`specgram`
-        :func:`specgram` can return the complex spectrum of segments within the
-        signal.
+    magnitude_spectrum
+        Returns the absolute value of this function.
+    angle_spectrum
+        Returns the angle of this function.
+    phase_spectrum
+        Returns the phase (unwrapped angle) of this function.
+    specgram
+        Can return the complex spectrum of segments within the signal.
     """
     return _single_spectrum_helper(x=x, Fs=Fs, window=window, pad_to=pad_to,
                                    sides=sides, mode='complex')
@@ -931,23 +871,16 @@ def magnitude_spectrum(x, Fs=None, window=None, pad_to=None,
 
     See Also
     --------
-    :func:`psd`
-        :func:`psd` returns the power spectral density.
-
-    :func:`complex_spectrum`
-        This function returns the absolute value of :func:`complex_spectrum`.
-
-    :func:`angle_spectrum`
-        :func:`angle_spectrum` returns the angles of the corresponding
-        frequencies.
-
-    :func:`phase_spectrum`
-        :func:`phase_spectrum` returns the phase (unwrapped angle) of the
-        corresponding frequencies.
-
-    :func:`specgram`
-        :func:`specgram` can return the magnitude spectrum of segments within
-        the signal.
+    psd
+        Returns the power spectral density.
+    complex_spectrum
+        This function returns the absolute value of `complex_spectrum`.
+    angle_spectrum
+        Returns the angles of the corresponding frequencies.
+    phase_spectrum
+        Returns the phase (unwrapped angle) of the corresponding frequencies.
+    specgram
+        Can return the complex spectrum of segments within the signal.
     """
     return _single_spectrum_helper(x=x, Fs=Fs, window=window, pad_to=pad_to,
                                    sides=sides, mode='magnitude')
@@ -980,19 +913,14 @@ def angle_spectrum(x, Fs=None, window=None, pad_to=None,
 
     See Also
     --------
-    :func:`complex_spectrum`
-        This function returns the angle value of :func:`complex_spectrum`.
-
-    :func:`magnitude_spectrum`
-        :func:`angle_spectrum` returns the magnitudes of the corresponding
-        frequencies.
-
-    :func:`phase_spectrum`
-        :func:`phase_spectrum` returns the unwrapped version of this function.
-
-    :func:`specgram`
-        :func:`specgram` can return the angle spectrum of segments within the
-        signal.
+    complex_spectrum
+        This function returns the angle value of `complex_spectrum`.
+    magnitude_spectrum
+        Returns the magnitudes of the corresponding frequencies.
+    phase_spectrum
+        Returns the phase (unwrapped angle) of the corresponding frequencies.
+    specgram
+        Can return the complex spectrum of segments within the signal.
     """
     return _single_spectrum_helper(x=x, Fs=Fs, window=window, pad_to=pad_to,
                                    sides=sides, mode='angle')
@@ -1025,19 +953,14 @@ def phase_spectrum(x, Fs=None, window=None, pad_to=None,
 
     See Also
     --------
-    :func:`complex_spectrum`
-        This function returns the angle value of :func:`complex_spectrum`.
-
-    :func:`magnitude_spectrum`
-        :func:`magnitude_spectrum` returns the magnitudes of the corresponding
-        frequencies.
-
-    :func:`angle_spectrum`
-        :func:`angle_spectrum` returns the wrapped version of this function.
-
-    :func:`specgram`
-        :func:`specgram` can return the phase spectrum of segments within the
-        signal.
+    complex_spectrum
+        This function returns the phase value of `complex_spectrum`.
+    magnitude_spectrum
+        Returns the magnitudes of the corresponding frequencies.
+    angle_spectrum
+        Returns the angle (wrapped phase) of the corresponding frequencies.
+    specgram
+        Can return the complex spectrum of segments within the signal.
     """
     return _single_spectrum_helper(x=x, Fs=Fs, window=window, pad_to=pad_to,
                                    sides=sides, mode='phase')
@@ -1058,7 +981,7 @@ def specgram(x, NFFT=None, Fs=None, detrend=None, window=None,
 
     Parameters
     ----------
-    x : array_like
+    x : array-like
         1-D array or sequence.
 
     %(Spectral)s
@@ -1087,13 +1010,13 @@ def specgram(x, NFFT=None, Fs=None, detrend=None, window=None,
 
     Returns
     -------
-    spectrum : array_like
+    spectrum : array-like
         2-D array, columns are the periodograms of successive segments.
 
-    freqs : array_like
+    freqs : array-like
         1-D array, frequencies corresponding to the rows in *spectrum*.
 
-    t : array_like
+    t : array-like
         1-D array, the times corresponding to midpoints of segments
         (i.e the columns in *spectrum*).
 
@@ -1115,8 +1038,9 @@ def specgram(x, NFFT=None, Fs=None, detrend=None, window=None,
     if NFFT is None:
         NFFT = 256  # same default as in _spectral_helper()
     if len(x) <= NFFT:
-        warnings.warn("Only one segment is calculated since parameter NFFT " +
-                      "(=%d) >= signal length (=%d)." % (NFFT, len(x)))
+        cbook._warn_external("Only one segment is calculated since parameter "
+                             "NFFT (=%d) >= signal length (=%d)." %
+                             (NFFT, len(x)))
 
     spec, freqs, t = _spectral_helper(x=x, y=None, NFFT=NFFT, Fs=Fs,
                                       detrend_func=detrend, window=window,
@@ -1131,21 +1055,16 @@ def specgram(x, NFFT=None, Fs=None, detrend=None, window=None,
     return spec, freqs, t
 
 
-_coh_error = """Coherence is calculated by averaging over *NFFT*
-length segments.  Your signal is too short for your choice of *NFFT*.
-"""
-
-
 @docstring.dedent_interpd
 def cohere(x, y, NFFT=256, Fs=2, detrend=detrend_none, window=window_hanning,
            noverlap=0, pad_to=None, sides='default', scale_by_freq=None):
-    """
+    r"""
     The coherence between *x* and *y*.  Coherence is the normalized
     cross spectral density:
 
     .. math::
 
-        C_{xy} = \\frac{|P_{xy}|^2}{P_{xx}P_{yy}}
+        C_{xy} = \frac{|P_{xy}|^2}{P_{xx}P_{yy}}
 
     Parameters
     ----------
@@ -1173,9 +1092,10 @@ def cohere(x, y, NFFT=256, Fs=2, detrend=detrend_none, window=window_hanning,
         For information about the methods used to compute :math:`P_{xy}`,
         :math:`P_{xx}` and :math:`P_{yy}`.
     """
-
     if len(x) < 2 * NFFT:
-        raise ValueError(_coh_error)
+        raise ValueError(
+            "Coherence is calculated by averaging over *NFFT* length "
+            "segments.  Your signal is too short for your choice of *NFFT*.")
     Pxx, f = psd(x, NFFT, Fs, detrend, window, noverlap, pad_to, sides,
                  scale_by_freq)
     Pyy, f = psd(y, NFFT, Fs, detrend, window, noverlap, pad_to, sides,
@@ -1466,13 +1386,13 @@ def _csv2rec(fname, comments='#', skiprows=0, checkrows=0, delimiter=',',
     return r
 
 
-class GaussianKDE(object):
+class GaussianKDE:
     """
     Representation of a kernel-density estimate using Gaussian kernels.
 
     Parameters
     ----------
-    dataset : array_like
+    dataset : array-like
         Datapoints to estimate from. In case of univariate data this is a 1-D
         array, otherwise a 2-D array with shape (# of dims, # of data).
 
@@ -1499,11 +1419,11 @@ class GaussianKDE(object):
         the covariance matrix is multiplied.
 
     covariance : ndarray
-        The covariance matrix of `dataset`, scaled by the calculated bandwidth
+        The covariance matrix of *dataset*, scaled by the calculated bandwidth
         (`kde.factor`).
 
     inv_cov : ndarray
-        The inverse of `covariance`.
+        The inverse of *covariance*.
 
     Methods
     -------
@@ -1524,17 +1444,16 @@ class GaussianKDE(object):
             raise ValueError("`dataset` input should have multiple elements.")
 
         self.dim, self.num_dp = np.array(self.dataset).shape
-        isString = isinstance(bw_method, str)
 
         if bw_method is None:
             pass
-        elif (isString and bw_method == 'scott'):
+        elif cbook._str_equal(bw_method, 'scott'):
             self.covariance_factor = self.scotts_factor
-        elif (isString and bw_method == 'silverman'):
+        elif cbook._str_equal(bw_method, 'silverman'):
             self.covariance_factor = self.silverman_factor
-        elif (np.isscalar(bw_method) and not isString):
-                self._bw_method = 'use constant'
-                self.covariance_factor = lambda: bw_method
+        elif isinstance(bw_method, Number):
+            self._bw_method = 'use constant'
+            self.covariance_factor = lambda: bw_method
         elif callable(bw_method):
             self._bw_method = bw_method
             self.covariance_factor = lambda: self._bw_method(self)
@@ -1557,9 +1476,8 @@ class GaussianKDE(object):
 
         self.covariance = self.data_covariance * self.factor ** 2
         self.inv_cov = self.data_inv_cov / self.factor ** 2
-        self.norm_factor = np.sqrt(
-            np.linalg.det(
-                2 * np.pi * self.covariance)) * self.num_dp
+        self.norm_factor = (np.sqrt(np.linalg.det(2 * np.pi * self.covariance))
+                            * self.num_dp)
 
     def scotts_factor(self):
         return np.power(self.num_dp, -1. / (self.dim + 4))
@@ -1598,7 +1516,7 @@ class GaussianKDE(object):
             raise ValueError("points have dimension {}, dataset has dimension "
                              "{}".format(dim, self.dim))
 
-        result = np.zeros((num_m,), dtype=float)
+        result = np.zeros(num_m)
 
         if num_m >= self.num_dp:
             # there are more points than data, so loop over data

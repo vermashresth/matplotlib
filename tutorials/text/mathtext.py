@@ -66,6 +66,15 @@ To make subscripts and superscripts, use the ``'_'`` and ``'^'`` symbols::
 
     \alpha_i > \beta_i
 
+To display multi-letter subscripts or superscripts correctly,
+you should put them in curly braces ``{...}``::
+
+    r'$\alpha^{ic} > \beta_{ic}$'
+
+.. math::
+
+    \alpha^{ic} > \beta_{ic}
+
 Some symbols automatically put their sub/superscripts under and over the
 operator.  For example, to write the sum of :mathmpl:`x_i` from :mathmpl:`0` to
 :mathmpl:`\infty`, you could do::
@@ -80,15 +89,16 @@ Fractions, binomials, and stacked numbers
 -----------------------------------------
 
 Fractions, binomials, and stacked numbers can be created with the
-``\frac{}{}``, ``\binom{}{}`` and ``\stackrel{}{}`` commands, respectively::
+``\frac{}{}``, ``\binom{}{}`` and ``\genfrac{}{}{}{}{}{}`` commands,
+respectively::
 
-    r'$\frac{3}{4} \binom{3}{4} \stackrel{3}{4}$'
+    r'$\frac{3}{4} \binom{3}{4} \genfrac{}{}{0}{}{3}{4}$'
 
 produces
 
 .. math::
 
-    \frac{3}{4} \binom{3}{4} \stackrel{3}{4}
+    \frac{3}{4} \binom{3}{4} \stackrel{}{}{0}{}{3}{4}
 
 Fractions can be arbitrarily nested::
 
@@ -214,12 +224,6 @@ choice of:
     ``\mathrm{\mathsf{sansserif}}``  :math-stix:`\mathrm{\mathsf{sansserif}}`
     ================================ =========================================
 
-  .. only:: html
-
-    ================================ =========================================
-    ``\mathcircled{circled}``        :math-stix:`\mathcircled{circled}`
-    ================================ =========================================
-
 There are also three global "font sets" to choose from, which are
 selected using the ``mathtext.fontset`` parameter in :ref:`matplotlibrc
 <matplotlibrc-sample>`.
@@ -328,7 +332,7 @@ You can also use a large number of the TeX symbols, as in ``\infty``,
 If a particular symbol does not have a name (as is true of many of the more
 obscure symbols in the STIX fonts), Unicode characters can also be used::
 
-   ur'$\u23ce$'
+   r'$\u23ce$'
 
 Example
 -------

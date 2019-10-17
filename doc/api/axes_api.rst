@@ -1,6 +1,6 @@
-====
-axes
-====
+*******************
+``matplotlib.axes``
+*******************
 
 .. currentmodule:: matplotlib.axes
 
@@ -188,6 +188,8 @@ Text and Annotations
    Axes.inset_axes
    Axes.indicate_inset
    Axes.indicate_inset_zoom
+   Axes.secondary_xaxis
+   Axes.secondary_yaxis
 
 
 Fields
@@ -238,10 +240,7 @@ Appearance
    Axes.grid
 
    Axes.get_facecolor
-   Axes.get_fc
-
    Axes.set_facecolor
-   Axes.set_fc
 
 
 Property cycle
@@ -366,6 +365,9 @@ Aspect ratio
    Axes.apply_aspect
    Axes.set_aspect
    Axes.get_aspect
+
+   Axes.set_box_aspect
+   Axes.get_box_aspect
 
    Axes.set_adjustable
    Axes.get_adjustable

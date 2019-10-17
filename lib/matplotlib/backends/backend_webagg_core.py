@@ -11,19 +11,21 @@ Displays Agg images in the browser, with interactivity
 #   application, implemented with tornado.
 
 import datetime
-from io import StringIO
+from io import BytesIO, StringIO
 import json
+import logging
 import os
 from pathlib import Path
-import warnings
 
 import numpy as np
+from PIL import Image
 import tornado
 
+from matplotlib import backend_bases, cbook
 from matplotlib.backends import backend_agg
 from matplotlib.backend_bases import _Backend
-from matplotlib import backend_bases, _png
 
+_log = logging.getLogger(__name__)
 
 # http://www.cambiaresearch.com/articles/15/javascript-char-codes-key-codes
 _SHIFT_LUT = {59: ':',
@@ -162,10 +164,8 @@ class FigureCanvasWebAggCore(backend_agg.FigureCanvasAgg):
         Note: diff images may not contain transparency, therefore upon
         draw this mode may be changed if the resulting image has any
         transparent component.
-
         """
-        if mode not in ['full', 'diff']:
-            raise ValueError('image mode must be either full or diff.')
+        cbook._check_in_list(['full', 'diff'], mode=mode)
         if self._current_image_mode != mode:
             self._current_image_mode = mode
             self.handle_send_image_mode(None)
@@ -195,18 +195,15 @@ class FigureCanvasWebAggCore(backend_agg.FigureCanvasAgg):
                 diff = buff != last_buffer
                 output = np.where(diff, buff, 0)
 
-            # TODO: We should write a new version of write_png that
-            # handles the differencing inline
-            buff = _png.write_png(
-                output.view(dtype=np.uint8).reshape(output.shape + (4,)),
-                None, compression=6, filter=_png.PNG_FILTER_NONE)
-
+            buf = BytesIO()
+            data = output.view(dtype=np.uint8).reshape((*output.shape, 4))
+            Image.fromarray(data).save(buf, format="png")
             # Swap the renderer frames
             self._renderer, self._last_renderer = (
                 self._last_renderer, renderer)
             self._force_full = False
             self._png_is_old = False
-            return buff
+            return buf.getvalue()
 
     def get_renderer(self, cleared=None):
         # Mirrors super.get_renderer, but caches the old one
@@ -241,8 +238,8 @@ class FigureCanvasWebAggCore(backend_agg.FigureCanvasAgg):
         return handler(event)
 
     def handle_unknown_event(self, event):
-        warnings.warn('Unhandled message type {0}. {1}'.format(
-            event['type'], event), stacklevel=2)
+        _log.warning('Unhandled message type {0}. {1}'.format(
+                     event['type'], event))
 
     def handle_ack(self, event):
         # Network latency tends to decrease if traffic is flowing
@@ -469,7 +466,7 @@ class FigureManagerWebAgg(backend_bases.FigureManagerBase):
         for filetype, ext in sorted(FigureCanvasWebAggCore.
                                     get_supported_filetypes_grouped().
                                     items()):
-            if not ext[0] == 'pgf':  # pgf does not support BytesIO
+            if ext[0] != 'pgf':  # pgf does not support BytesIO
                 extensions.append(ext[0])
         output.write("mpl.extensions = {0};\n\n".format(
             json.dumps(extensions)))

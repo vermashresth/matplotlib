@@ -6,7 +6,10 @@ from .mpl_axes import Axes
 
 def make_rgb_axes(ax, pad=0.01, axes_class=None, add_all=True):
     """
-    pad : fraction of the axes height.
+    Parameters
+    ----------
+    pad : float
+        Fraction of the axes height.
     """
 
     divider = make_axes_locatable(ax)
@@ -68,7 +71,7 @@ def imshow_rgb(ax, r, g, b, **kwargs):
     return im_rgb
 
 
-class RGBAxesBase(object):
+class RGBAxesBase:
     """base class for a 4-panel imshow (RGB, R, G, B)
 
     Layout:

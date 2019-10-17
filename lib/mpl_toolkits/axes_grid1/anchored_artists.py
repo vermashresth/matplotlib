@@ -1,4 +1,4 @@
-from matplotlib import docstring, transforms
+from matplotlib import transforms
 from matplotlib.offsetbox import (AnchoredOffsetbox, AuxTransformBox,
                                   DrawingArea, TextArea, VPacker)
 from matplotlib.patches import (Rectangle, Ellipse, ArrowStyle,
@@ -10,7 +10,6 @@ __all__ = ['AnchoredDrawingArea', 'AnchoredAuxTransformBox',
 
 
 class AnchoredDrawingArea(AnchoredOffsetbox):
-    @docstring.dedent
     def __init__(self, width, height, xdescent, ydescent,
                  loc, pad=0.4, borderpad=0.5, prop=None, frameon=True,
                  **kwargs):
@@ -87,7 +86,6 @@ class AnchoredDrawingArea(AnchoredOffsetbox):
 
 
 class AnchoredAuxTransformBox(AnchoredOffsetbox):
-    @docstring.dedent
     def __init__(self, transform, loc,
                  pad=0.4, borderpad=0.5, prop=None, frameon=True, **kwargs):
         """
@@ -146,7 +144,7 @@ class AnchoredAuxTransformBox(AnchoredOffsetbox):
         height of 0.4 in data coordinates:
 
         >>> box = AnchoredAuxTransformBox(ax.transData, loc='upper left')
-        >>> el = Ellipse((0,0), width=0.1, height=0.4, angle=30)
+        >>> el = Ellipse((0, 0), width=0.1, height=0.4, angle=30)
         >>> box.drawing_area.add_artist(el)
         >>> ax.add_artist(box)
         """
@@ -160,7 +158,6 @@ class AnchoredAuxTransformBox(AnchoredOffsetbox):
 
 
 class AnchoredEllipse(AnchoredOffsetbox):
-    @docstring.dedent
     def __init__(self, transform, width, height, angle, loc,
                  pad=0.1, borderpad=0.1, prop=None, frameon=True, **kwargs):
         """
@@ -226,7 +223,6 @@ class AnchoredEllipse(AnchoredOffsetbox):
 
 
 class AnchoredSizeBar(AnchoredOffsetbox):
-    @docstring.dedent
     def __init__(self, transform, size, label, loc,
                  pad=0.1, borderpad=0.1, sep=2,
                  frameon=True, size_vertical=0, color='black',
@@ -324,7 +320,7 @@ class AnchoredSizeBar(AnchoredOffsetbox):
         >>> from mpl_toolkits.axes_grid1.anchored_artists import (
         ...     AnchoredSizeBar)
         >>> fig, ax = plt.subplots()
-        >>> ax.imshow(np.random.random((10,10)))
+        >>> ax.imshow(np.random.random((10, 10)))
         >>> bar = AnchoredSizeBar(ax.transData, 3, '3 data units', 4)
         >>> ax.add_artist(bar)
         >>> fig.show()
@@ -375,7 +371,6 @@ class AnchoredSizeBar(AnchoredOffsetbox):
 
 
 class AnchoredDirectionArrows(AnchoredOffsetbox):
-    @docstring.dedent
     def __init__(self, transform, label_x, label_y, length=0.15,
                  fontsize=0.08, loc=2, angle=0, aspect_ratio=1, pad=0.4,
                  borderpad=0.4, frameon=False, color='w', alpha=1,
@@ -392,7 +387,7 @@ class AnchoredDirectionArrows(AnchoredOffsetbox):
             The transformation object for the coordinate system in use, i.e.,
             :attr:`matplotlib.axes.Axes.transAxes`.
 
-        label_x, label_y : string
+        label_x, label_y : str
             Label text for the x and y arrows
 
         length : int or float, optional
@@ -508,7 +503,7 @@ class AnchoredDirectionArrows(AnchoredOffsetbox):
         >>> from mpl_toolkits.axes_grid1.anchored_artists import (
         ...     AnchoredDirectionArrows)
         >>> fig, ax = plt.subplots()
-        >>> ax.imshow(np.random.random((10,10)))
+        >>> ax.imshow(np.random.random((10, 10)))
         >>> arrows = AnchoredDirectionArrows(ax.transAxes, '111', '110')
         >>> ax.add_artist(arrows)
         >>> fig.show()

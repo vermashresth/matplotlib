@@ -83,7 +83,7 @@ def pick_simple():
     line, = ax1.plot(rand(100), 'o', picker=5)  # 5 points tolerance
 
     # pick the rectangle
-    bars = ax2.bar(range(10), rand(10), picker=True)
+    ax2.bar(range(10), rand(10), picker=True)
     for label in ax2.get_xticklabels():  # make the xtick labels pickable
         label.set_picker(True)
 
@@ -93,7 +93,7 @@ def pick_simple():
             xdata = thisline.get_xdata()
             ydata = thisline.get_ydata()
             ind = event.ind
-            print('onpick1 line:', zip(np.take(xdata, ind), np.take(ydata, ind)))
+            print('onpick1 line:', np.column_stack([xdata[ind], ydata[ind]]))
         elif isinstance(event.artist, Rectangle):
             patch = event.artist
             print('onpick1 patch:', patch.get_path())
@@ -117,9 +117,9 @@ def pick_custom_hit():
 
     def line_picker(line, mouseevent):
         """
-        find the points within a certain distance from the mouseclick in
+        Find the points within a certain distance from the mouseclick in
         data coords and attach some extra attributes, pickx and picky
-        which are the data points that were picked
+        which are the data points that were picked.
         """
         if mouseevent.xdata is None:
             return False, dict()
@@ -129,10 +129,10 @@ def pick_custom_hit():
         d = np.sqrt(
             (xdata - mouseevent.xdata)**2 + (ydata - mouseevent.ydata)**2)
 
-        ind = np.nonzero(np.less_equal(d, maxd))
+        ind, = np.nonzero(d <= maxd)
         if len(ind):
-            pickx = np.take(xdata, ind)
-            picky = np.take(ydata, ind)
+            pickx = xdata[ind]
+            picky = ydata[ind]
             props = dict(ind=ind, pickx=pickx, picky=picky)
             return True, props
         else:
@@ -154,22 +154,21 @@ def pick_scatter_plot():
 
     def onpick3(event):
         ind = event.ind
-        print('onpick3 scatter:', ind, np.take(x, ind), np.take(y, ind))
+        print('onpick3 scatter:', ind, x[ind], y[ind])
 
     fig, ax = plt.subplots()
-    col = ax.scatter(x, y, 100*s, c, picker=True)
-    #fig.savefig('pscoll.eps')
+    ax.scatter(x, y, 100*s, c, picker=True)
     fig.canvas.mpl_connect('pick_event', onpick3)
 
 
 def pick_image():
     # picking images (matplotlib.image.AxesImage)
     fig, ax = plt.subplots()
-    im1 = ax.imshow(rand(10, 5), extent=(1, 2, 1, 2), picker=True)
-    im2 = ax.imshow(rand(5, 10), extent=(3, 4, 1, 2), picker=True)
-    im3 = ax.imshow(rand(20, 25), extent=(1, 2, 3, 4), picker=True)
-    im4 = ax.imshow(rand(30, 12), extent=(3, 4, 3, 4), picker=True)
-    ax.axis([0, 5, 0, 5])
+    ax.imshow(rand(10, 5), extent=(1, 2, 1, 2), picker=True)
+    ax.imshow(rand(5, 10), extent=(3, 4, 1, 2), picker=True)
+    ax.imshow(rand(20, 25), extent=(1, 2, 3, 4), picker=True)
+    ax.imshow(rand(30, 12), extent=(3, 4, 3, 4), picker=True)
+    ax.set(xlim=(0, 5), ylim=(0, 5))
 
     def onpick4(event):
         artist = event.artist

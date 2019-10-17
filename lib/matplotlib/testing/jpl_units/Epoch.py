@@ -3,10 +3,12 @@
 import operator
 import math
 import datetime as DT
+
+from matplotlib import cbook
 from matplotlib.dates import date2num
 
 
-class Epoch(object):
+class Epoch:
     # Frame conversion offsets in seconds
     # t(TO) = t(FROM) + allowed[ FROM ][ TO ]
     allowed = {
@@ -56,11 +58,7 @@ class Epoch(object):
                 "dnum= %s\n"
                 "dt  = %s" % (sec, jd, daynum, dt))
 
-        if frame not in self.allowed:
-            raise ValueError(
-                "Input frame '%s' is not one of the supported frames of %s" %
-                (frame, list(self.allowed.keys())))
-
+        cbook._check_in_list(self.allowed, frame=frame)
         self._frame = frame
 
         if dt is not None:
@@ -77,7 +75,7 @@ class Epoch(object):
             self._jd = float(jd)
 
             # Resolve seconds down to [ 0, 86400)
-            deltaDays = int(math.floor(self._seconds / 86400.0))
+            deltaDays = math.floor(self._seconds / 86400)
             self._jd += deltaDays
             self._seconds -= deltaDays * 86400.0
 
@@ -213,7 +211,7 @@ class Epoch(object):
         - step      Step to use.
 
         = RETURN VALUE
-        - Returns a list contianing the requested Epoch values.
+        - Returns a list containing the requested Epoch values.
         """
         elems = []
 

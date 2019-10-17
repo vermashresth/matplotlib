@@ -13,17 +13,17 @@ contains all the plot elements.  The following classes are defined
 
 import logging
 from numbers import Integral
-import warnings
 
 import numpy as np
 
 from matplotlib import rcParams
-from matplotlib import backends, docstring
+from matplotlib import backends, docstring, projections
 from matplotlib import __version__ as _mpl_version
 from matplotlib import get_backend
 
 import matplotlib.artist as martist
 from matplotlib.artist import Artist, allow_rasterization
+from matplotlib.backend_bases import FigureCanvasBase, NonGuiException
 import matplotlib.cbook as cbook
 import matplotlib.colorbar as cbar
 import matplotlib.image as mimage
@@ -33,17 +33,13 @@ from matplotlib.blocking_input import BlockingMouseInput, BlockingKeyMouseInput
 from matplotlib.gridspec import GridSpec
 import matplotlib.legend as mlegend
 from matplotlib.patches import Rectangle
-from matplotlib.projections import (get_projection_names,
-                                    process_projection_requirements)
+from matplotlib.projections import process_projection_requirements
 from matplotlib.text import Text, TextWithDash
 from matplotlib.transforms import (Affine2D, Bbox, BboxTransformTo,
                                    TransformedBbox)
 import matplotlib._layoutbox as layoutbox
-from matplotlib.backend_bases import NonGuiException
 
 _log = logging.getLogger(__name__)
-
-docstring.interpd.update(projection_names=get_projection_names())
 
 
 def _stale_figure_callback(self, val):
@@ -51,16 +47,16 @@ def _stale_figure_callback(self, val):
         self.figure.stale = val
 
 
-class AxesStack(cbook.Stack):
+class _AxesStack(cbook.Stack):
     """
     Specialization of the `.Stack` to handle all tracking of
     `~matplotlib.axes.Axes` in a `.Figure`.
     This stack stores ``key, (ind, axes)`` pairs, where:
 
-        * **key** should be a hash of the args and kwargs
-          used in generating the Axes.
-        * **ind** is a serial number for tracking the order
-          in which axes were added.
+    * **key** should be a hash of the args and kwargs
+      used in generating the Axes.
+    * **ind** is a serial number for tracking the order
+      in which axes were added.
 
     The AxesStack is a callable, where ``ax_stack()`` returns
     the current axes. Alternatively the :meth:`current_key_axes` will
@@ -89,11 +85,12 @@ class AxesStack(cbook.Stack):
             return None
         cbook.warn_deprecated(
             "2.1",
-            "Adding an axes using the same arguments as a previous axes "
-            "currently reuses the earlier instance.  In a future version, "
-            "a new instance will always be created and returned.  Meanwhile, "
-            "this warning can be suppressed, and the future behavior ensured, "
-            "by passing a unique label to each axes instance.")
+            message="Adding an axes using the same arguments as a previous "
+            "axes currently reuses the earlier instance.  In a future "
+            "version, a new instance will always be created and returned.  "
+            "Meanwhile, this warning can be suppressed, and the future "
+            "behavior ensured, by passing a unique label to each axes "
+            "instance.")
         return item[1]
 
     def _entry_from_axes(self, e):
@@ -122,8 +119,7 @@ class AxesStack(cbook.Stack):
         """
         # All the error checking may be unnecessary; but this method
         # is called so seldom that the overhead is negligible.
-        if not isinstance(a, Axes):
-            raise ValueError("second argument, {!r}, is not an Axes".format(a))
+        cbook._check_isinstance(Axes, a=a)
         try:
             hash(key)
         except TypeError:
@@ -132,7 +128,7 @@ class AxesStack(cbook.Stack):
         a_existing = self.get(key)
         if a_existing is not None:
             super().remove((key, a_existing))
-            warnings.warn(
+            cbook._warn_external(
                 "key {!r} already existed; Axes is being replaced".format(key))
             # I don't think the above should ever happen.
 
@@ -160,39 +156,44 @@ class AxesStack(cbook.Stack):
         return a in self.as_list()
 
 
-class SubplotParams(object):
+@cbook.deprecated("3.2")
+class AxesStack(_AxesStack):
+    pass
+
+
+class SubplotParams:
     """
     A class to hold the parameters for a subplot.
     """
     def __init__(self, left=None, bottom=None, right=None, top=None,
                  wspace=None, hspace=None):
         """
-        All dimensions are fractions of the figure width or height.
         Defaults are given by :rc:`figure.subplot.[name]`.
 
         Parameters
         ----------
         left : float
-            The left side of the subplots of the figure.
-
+            The position of the left edge of the subplots,
+            as a fraction of the figure width.
         right : float
-            The right side of the subplots of the figure.
-
+            The position of the right edge of the subplots,
+            as a fraction of the figure width.
         bottom : float
-            The bottom of the subplots of the figure.
-
+            The position of the bottom edge of the subplots,
+            as a fraction of the figure height.
         top : float
-            The top of the subplots of the figure.
-
+            The position of the top edge of the subplots,
+            as a fraction of the figure height.
         wspace : float
-            The amount of width reserved for space between subplots,
-            expressed as a fraction of the average axis width.
-
+            The width of the padding between subplots,
+            as a fraction of the average axes width.
         hspace : float
-            The amount of height reserved for space between subplots,
-            expressed as a fraction of the average axis height.
+            The height of the padding between subplots,
+            as a fraction of the average axes height.
         """
         self.validate = True
+        for key in ["left", "bottom", "right", "top", "wspace", "hspace"]:
+            setattr(self, key, rcParams[f"figure.subplot.{key}"])
         self.update(left, bottom, right, top, wspace, hspace)
 
     def update(self, left=None, bottom=None, right=None, top=None,
@@ -200,45 +201,25 @@ class SubplotParams(object):
         """
         Update the dimensions of the passed parameters. *None* means unchanged.
         """
-        thisleft = getattr(self, 'left', None)
-        thisright = getattr(self, 'right', None)
-        thistop = getattr(self, 'top', None)
-        thisbottom = getattr(self, 'bottom', None)
-        thiswspace = getattr(self, 'wspace', None)
-        thishspace = getattr(self, 'hspace', None)
-
-        self._update_this('left', left)
-        self._update_this('right', right)
-        self._update_this('bottom', bottom)
-        self._update_this('top', top)
-        self._update_this('wspace', wspace)
-        self._update_this('hspace', hspace)
-
-        def reset():
-            self.left = thisleft
-            self.right = thisright
-            self.top = thistop
-            self.bottom = thisbottom
-            self.wspace = thiswspace
-            self.hspace = thishspace
-
         if self.validate:
-            if self.left >= self.right:
-                reset()
+            if ((left if left is not None else self.left)
+                    >= (right if right is not None else self.right)):
                 raise ValueError('left cannot be >= right')
-
-            if self.bottom >= self.top:
-                reset()
+            if ((bottom if bottom is not None else self.bottom)
+                    >= (top if top is not None else self.top)):
                 raise ValueError('bottom cannot be >= top')
-
-    def _update_this(self, s, val):
-        if val is None:
-            val = getattr(self, s, None)
-            if val is None:
-                key = 'figure.subplot.' + s
-                val = rcParams[key]
-
-        setattr(self, s, val)
+        if left is not None:
+            self.left = left
+        if right is not None:
+            self.right = right
+        if bottom is not None:
+            self.bottom = bottom
+        if top is not None:
+            self.top = top
+        if wspace is not None:
+            self.wspace = wspace
+        if hspace is not None:
+            self.hspace = hspace
 
 
 class Figure(Artist):
@@ -253,7 +234,7 @@ class Figure(Artist):
     Attributes
     ----------
     patch
-        The `.Rectangle` instance representing the figure patch.
+        The `.Rectangle` instance representing the figure background patch.
 
     suppressComposite
         For multiple figure images, the figure will make composite images
@@ -303,7 +284,7 @@ class Figure(Artist):
             patch).
 
         frameon : bool, default: :rc:`figure.frameon`
-            If ``False``, suppress drawing the figure frame.
+            If ``False``, suppress drawing the figure background patch.
 
         subplotpars : :class:`SubplotParams`
             Subplot parameters. If not given, the default subplot
@@ -344,27 +325,27 @@ class Figure(Artist):
         if frameon is None:
             frameon = rcParams['figure.frameon']
 
-        if not np.isfinite(figsize).all():
-            raise ValueError('figure size must be finite not '
-                             '{}'.format(figsize))
+        if not np.isfinite(figsize).all() or (np.array(figsize) <= 0).any():
+            raise ValueError('figure size must be positive finite not '
+                             f'{figsize}')
         self.bbox_inches = Bbox.from_bounds(0, 0, *figsize)
 
-        self.dpi_scale_trans = Affine2D().scale(dpi, dpi)
+        self.dpi_scale_trans = Affine2D().scale(dpi)
         # do not use property as it will trigger
         self._dpi = dpi
         self.bbox = TransformedBbox(self.bbox_inches, self.dpi_scale_trans)
 
-        self.frameon = frameon
-
         self.transFigure = BboxTransformTo(self.bbox)
 
         self.patch = Rectangle(
-            xy=(0, 0), width=1, height=1,
-            facecolor=facecolor, edgecolor=edgecolor, linewidth=linewidth)
+            xy=(0, 0), width=1, height=1, visible=frameon,
+            facecolor=facecolor, edgecolor=edgecolor, linewidth=linewidth,
+            # Don't let the figure patch influence bbox calculation.
+            in_layout=False)
         self._set_artist_props(self.patch)
         self.patch.set_antialiased(False)
 
-        self.canvas = None
+        FigureCanvasBase(self)  # Set self.canvas.
         self._suptitle = None
 
         if subplotpars is None:
@@ -378,7 +359,7 @@ class Figure(Artist):
 
         self.set_tight_layout(tight_layout)
 
-        self._axstack = AxesStack()  # track all figure axes and current axes
+        self._axstack = _AxesStack()  # track all figure axes and current axes
         self.clf()
         self._cachedRenderer = None
 
@@ -397,9 +378,8 @@ class Figure(Artist):
 
     def _repr_html_(self):
         # We can't use "isinstance" here, because then we'd end up importing
-        # webagg unconditiionally.
-        if (self.canvas is not None and
-                'WebAgg' in self.canvas.__class__.__name__):
+        # webagg unconditionally.
+        if 'WebAgg' in type(self.canvas).__name__:
             from matplotlib.backends import backend_webagg
             return backend_webagg.ipython_inline_display(self)
 
@@ -412,31 +392,32 @@ class Figure(Artist):
         :class:`~matplotlib.backend_bases.FigureManagerBase`, and
         will raise an AttributeError.
 
+        .. warning::
+            This does not manage an GUI event loop. Consequently, the figure
+            may only be shown briefly or not shown at all if you or your
+            environment are not managing an event loop.
+
+            Proper use cases for `.Figure.show` include running this from a
+            GUI application or an IPython shell.
+
+            If you're running a pure python shell or executing a non-GUI
+            python script, you should use `matplotlib.pyplot.show` instead,
+            which takes care of managing the event loop for you.
+
         Parameters
         ----------
         warn : bool
             If ``True`` and we are not running headless (i.e. on Linux with an
             unset DISPLAY), issue warning when called on a non-GUI backend.
         """
+        if self.canvas.manager is None:
+            raise AttributeError(
+                "Figure.show works only for figures managed by pyplot, "
+                "normally created by pyplot.figure()")
         try:
-            manager = getattr(self.canvas, 'manager')
-        except AttributeError as err:
-            raise AttributeError("%s\n"
-                                 "Figure.show works only "
-                                 "for figures managed by pyplot, normally "
-                                 "created by pyplot.figure()." % err)
-
-        if manager is not None:
-            try:
-                manager.show()
-                return
-            except NonGuiException:
-                pass
-        if (backends._get_running_interactive_framework() != "headless"
-                and warn):
-            warnings.warn('Matplotlib is currently using %s, which is a '
-                          'non-GUI backend, so cannot show the figure.'
-                          % get_backend())
+            self.canvas.manager.show()
+        except NonGuiException as exc:
+            cbook._warn_external(str(exc))
 
     def _get_axes(self):
         return self._axstack.as_list()
@@ -461,7 +442,7 @@ class Figure(Artist):
             Passed on to `~.Figure.set_size_inches`
         """
         self._dpi = dpi
-        self.dpi_scale_trans.clear().scale(dpi, dpi)
+        self.dpi_scale_trans.clear().scale(dpi)
         w, h = self.get_size_inches()
         self.set_size_inches(w, h, forward=forward)
         self.callbacks.process('dpi_changed', self)
@@ -538,7 +519,6 @@ class Figure(Artist):
 
         Parameters
         ----------
-
         w_pad : scalar
             Width padding in inches.  This is the pad around axes
             and is meant to make sure there is enough room for fonts to
@@ -576,7 +556,6 @@ class Figure(Artist):
 
         Parameters
         ----------
-
         relative : boolean
             If `True`, then convert from inches to figure relative.
         """
@@ -585,7 +564,7 @@ class Figure(Artist):
         wspace = self._constrained_layout_pads['wspace']
         hspace = self._constrained_layout_pads['hspace']
 
-        if relative and ((w_pad is not None) or (h_pad is not None)):
+        if relative and (w_pad is not None or h_pad is not None):
             renderer0 = layoutbox.get_renderer(self)
             dpi = renderer0.dpi
             w_pad = w_pad * dpi / renderer0.width
@@ -610,7 +589,7 @@ class Figure(Artist):
         rotation : angle in degrees
             The rotation of the xtick labels.
 
-        ha : string
+        ha : str
             The horizontal alignment of the xticklabels.
 
         which : {None, 'major', 'minor', 'both'}
@@ -640,15 +619,14 @@ class Figure(Artist):
 
     def get_children(self):
         """Get a list of artists contained in the figure."""
-        children = [self.patch]
-        children.extend(self.artists)
-        children.extend(self.axes)
-        children.extend(self.lines)
-        children.extend(self.patches)
-        children.extend(self.texts)
-        children.extend(self.images)
-        children.extend(self.legends)
-        return children
+        return [self.patch,
+                *self.artists,
+                *self.axes,
+                *self.lines,
+                *self.patches,
+                *self.texts,
+                *self.images,
+                *self.legends]
 
     def contains(self, mouseevent):
         """
@@ -658,8 +636,9 @@ class Figure(Artist):
         -------
             bool, {}
         """
-        if callable(self._contains):
-            return self._contains(self, mouseevent)
+        inside, info = self._default_contains(mouseevent, figure=self)
+        if inside is not None:
+            return inside, info
         inside = self.bbox.contains(mouseevent.x, mouseevent.y)
         return inside, {}
 
@@ -720,7 +699,6 @@ default: 'top'
 
         Examples
         --------
-
         >>> fig.suptitle('This is the figure title', fontsize=12)
         """
         manual_position = ('x' in kwargs or 'y' in kwargs)
@@ -832,7 +810,7 @@ default: 'top'
         (:meth:`~matplotlib.axes.Axes.imshow`) which will be resampled
         to fit the current axes.  If you want a resampled image to
         fill the entire figure, you can define an
-        :class:`~matplotlib.axes.Axes` with extent [0,0,1,1].
+        :class:`~matplotlib.axes.Axes` with extent [0, 0, 1, 1].
 
 
         Examples::
@@ -863,43 +841,42 @@ default: 'top'
         return im
 
     def set_size_inches(self, w, h=None, forward=True):
-        """Set the figure size in inches.
+        """
+        Set the figure size in inches.
 
         Call signatures::
 
              fig.set_size_inches(w, h)  # OR
              fig.set_size_inches((w, h))
 
-        optional kwarg *forward=True* will cause the canvas size to be
-        automatically updated; e.g., you can resize the figure window
-        from the shell
-
-        ACCEPTS: a (w, h) tuple with w, h in inches
+        Parameters
+        ----------
+        w : (float, float) or float
+            Width and height in inches (if height not specified as a separate
+            argument) or width.
+        h : float
+            Height in inches.
+        forward : bool, default: True
+            If ``True``, the canvas size is automatically updated, e.g.,
+            you can resize the figure window from the shell.
 
         See Also
         --------
         matplotlib.Figure.get_size_inches
         """
-
-        # the width and height have been passed in as a tuple to the first
-        # argument, so unpack them
-        if h is None:
+        if h is None:  # Got called with a single pair as argument.
             w, h = w
-        if not all(np.isfinite(_) for _ in (w, h)):
-            raise ValueError('figure size must be finite not '
-                             '({}, {})'.format(w, h))
-        self.bbox_inches.p1 = w, h
-
+        size = np.array([w, h])
+        if not np.isfinite(size).all() or (size <= 0).any():
+            raise ValueError(f'figure size must be positive finite not {size}')
+        self.bbox_inches.p1 = size
         if forward:
             canvas = getattr(self, 'canvas')
             if canvas is not None:
-                ratio = getattr(self.canvas, '_dpi_ratio', 1)
-                dpival = self.dpi / ratio
-                canvasw = w * dpival
-                canvash = h * dpival
-                manager = getattr(self.canvas, 'manager', None)
+                dpi_ratio = getattr(canvas, '_dpi_ratio', 1)
+                manager = getattr(canvas, 'manager', None)
                 if manager is not None:
-                    manager.resize(int(canvasw), int(canvash))
+                    manager.resize(*(size * self.dpi / dpi_ratio).astype(int))
         self.stale = True
 
     def get_size_inches(self):
@@ -938,8 +915,12 @@ default: 'top'
         return self.dpi
 
     def get_frameon(self):
-        """Return whether the figure frame will be drawn."""
-        return self.frameon
+        """
+        Return the figure's background patch visibility, i.e.
+        whether the figure background will be drawn. Equivalent to
+        ``Figure.patch.get_visible()``.
+        """
+        return self.patch.get_visible()
 
     def set_edgecolor(self, color):
         """
@@ -996,54 +977,18 @@ default: 'top'
 
     def set_frameon(self, b):
         """
-        Set whether the figure frame (background) is displayed or invisible.
+        Set the figure's background patch visibility, i.e.
+        whether the figure background will be drawn. Equivalent to
+        ``Figure.patch.set_visible()``.
 
         Parameters
         ----------
         b : bool
         """
-        self.frameon = b
+        self.patch.set_visible(b)
         self.stale = True
 
-    def delaxes(self, ax):
-        """
-        Remove the `~matplotlib.axes.Axes` *ax* from the figure and update the
-        current axes.
-        """
-        self._axstack.remove(ax)
-        for func in self._axobservers:
-            func(self)
-        self.stale = True
-
-    def _make_key(self, *args, **kwargs):
-        """Make a hashable key out of args and kwargs."""
-
-        def fixitems(items):
-            # items may have arrays and lists in them, so convert them
-            # to tuples for the key
-            ret = []
-            for k, v in items:
-                # some objects can define __getitem__ without being
-                # iterable and in those cases the conversion to tuples
-                # will fail. So instead of using the np.iterable(v) function
-                # we simply try and convert to a tuple, and proceed if not.
-                try:
-                    v = tuple(v)
-                except Exception:
-                    pass
-                ret.append((k, v))
-            return tuple(ret)
-
-        def fixlist(args):
-            ret = []
-            for a in args:
-                if np.iterable(a):
-                    a = tuple(a)
-                ret.append(a)
-            return tuple(ret)
-
-        key = fixlist(args), fixitems(kwargs.items())
-        return key
+    frameon = property(get_frameon, set_frameon)
 
     def add_artist(self, artist, clip=False):
         """
@@ -1081,6 +1026,68 @@ default: 'top'
         self.stale = True
         return artist
 
+    def _make_key(self, *args, **kwargs):
+        """Make a hashable key out of args and kwargs."""
+
+        def fixitems(items):
+            # items may have arrays and lists in them, so convert them
+            # to tuples for the key
+            ret = []
+            for k, v in items:
+                # some objects can define __getitem__ without being
+                # iterable and in those cases the conversion to tuples
+                # will fail. So instead of using the np.iterable(v) function
+                # we simply try and convert to a tuple, and proceed if not.
+                try:
+                    v = tuple(v)
+                except Exception:
+                    pass
+                ret.append((k, v))
+            return tuple(ret)
+
+        def fixlist(args):
+            ret = []
+            for a in args:
+                if np.iterable(a):
+                    a = tuple(a)
+                ret.append(a)
+            return tuple(ret)
+
+        key = fixlist(args), fixitems(kwargs.items())
+        return key
+
+    def _process_projection_requirements(
+            self, *args, polar=False, projection=None, **kwargs):
+        """
+        Handle the args/kwargs to add_axes/add_subplot/gca, returning::
+
+            (axes_proj_class, proj_class_kwargs, proj_stack_key)
+
+        which can be used for new axes initialization/identification.
+        """
+        if polar:
+            if projection is not None and projection != 'polar':
+                raise ValueError(
+                    "polar=True, yet projection=%r. "
+                    "Only one of these arguments should be supplied." %
+                    projection)
+            projection = 'polar'
+
+        if isinstance(projection, str) or projection is None:
+            projection_class = projections.get_projection_class(projection)
+        elif hasattr(projection, '_as_mpl_axes'):
+            projection_class, extra_kwargs = projection._as_mpl_axes()
+            kwargs.update(**extra_kwargs)
+        else:
+            raise TypeError('projection must be a string, None or implement a '
+                            '_as_mpl_axes method. Got %r' % projection)
+
+        # Make the key without projection kwargs, this is used as a unique
+        # lookup for axes instances
+        key = self._make_key(*args, **kwargs)
+
+        return projection_class, kwargs, key
+
     @docstring.dedent_interpd
     def add_axes(self, *args, **kwargs):
         """
@@ -1093,7 +1100,6 @@ default: 'top'
 
         Parameters
         ----------
-
         rect : sequence of float
             The dimensions [left, bottom, width, height] of the new axes. All
             quantities are in fractions of figure width and height.
@@ -1104,7 +1110,7 @@ default: 'top'
             a custom projection, see `~matplotlib.projections`. The default
             None results in a 'rectilinear' projection.
 
-        polar : boolean, optional
+        polar : bool, default: False
             If True, equivalent to projection='polar'.
 
         sharex, sharey : `~.axes.Axes`, optional
@@ -1124,6 +1130,7 @@ default: 'top'
             the following table but there might also be other keyword
             arguments if another projection is used, see the actual axes
             class.
+
             %(Axes)s
 
         Returns
@@ -1163,16 +1170,21 @@ default: 'top'
 
             rect = l, b, w, h
             fig = plt.figure()
-            fig.add_axes(rect,label=label1)
-            fig.add_axes(rect,label=label2)
+            fig.add_axes(rect, label=label1)
+            fig.add_axes(rect, label=label2)
             fig.add_axes(rect, frameon=False, facecolor='g')
             fig.add_axes(rect, polar=True)
-            ax=fig.add_axes(rect, projection='polar')
+            ax = fig.add_axes(rect, projection='polar')
             fig.delaxes(ax)
             fig.add_axes(ax)
         """
 
         if not len(args):
+            cbook.warn_deprecated(
+                "3.3",
+                message="Calling add_axes() without argument is "
+                "deprecated. You may want to use add_suplot() "
+                "instead.")
             return
 
         # shortcut the projection "key" modifications later on, if an axes
@@ -1193,8 +1205,8 @@ default: 'top'
             if not np.isfinite(rect).all():
                 raise ValueError('all entries in rect must be finite '
                                  'not {}'.format(rect))
-            projection_class, kwargs, key = process_projection_requirements(
-                self, *args, **kwargs)
+            projection_class, kwargs, key = \
+                self._process_projection_requirements(*args, **kwargs)
 
             # check that an axes of this type doesn't already exist, if it
             # does, set it as active and return it
@@ -1206,12 +1218,7 @@ default: 'top'
             # create the new axes using the axes class given
             a = projection_class(self, rect, **kwargs)
 
-        self._axstack.add(key, a)
-        self.sca(a)
-        a._remove_method = self._remove_ax
-        self.stale = True
-        a.stale_callback = _stale_figure_callback
-        return a
+        return self._add_axes_internal(key, a)
 
     @docstring.dedent_interpd
     def add_subplot(self, *args, **kwargs):
@@ -1223,6 +1230,7 @@ default: 'top'
            add_subplot(nrows, ncols, index, **kwargs)
            add_subplot(pos, **kwargs)
            add_subplot(ax)
+           add_subplot()
 
         Parameters
         ----------
@@ -1240,13 +1248,19 @@ default: 'top'
             fig.add_subplot(2, 3, 5). Note that all integers must be less than
             10 for this form to work.
 
+            If no positional arguments are passed, defaults to (1, 1, 1).
+
+            In rare circumstances, `.add_subplot` may be called with a single
+            argument, a subplot axes instance already created in the
+            present figure but not in the figure's list of axes.
+
         projection : {None, 'aitoff', 'hammer', 'lambert', 'mollweide', \
 'polar', 'rectilinear', str}, optional
             The projection type of the subplot (`~.axes.Axes`). *str* is the
             name of a custom projection, see `~matplotlib.projections`. The
             default None results in a 'rectilinear' projection.
 
-        polar : boolean, optional
+        polar : bool, default: False
             If True, equivalent to projection='polar'.
 
         sharex, sharey : `~.axes.Axes`, optional
@@ -1260,17 +1274,17 @@ default: 'top'
         Other Parameters
         ----------------
         **kwargs
-            This method also takes the keyword arguments for
-            the returned axes base class. The keyword arguments for the
-            rectilinear base class `~.axes.Axes` can be found in
+            This method also takes the keyword arguments for the returned axes
+            base class; except for the *figure* argument. The keyword arguments
+            for the rectilinear base class `~.axes.Axes` can be found in
             the following table but there might also be other keyword
             arguments if another projection is used.
+
             %(Axes)s
 
         Returns
         -------
-        axes : an `.axes.SubplotBase` subclass of `~.axes.Axes` (or a \
-               subclass of `~.axes.Axes`)
+        axes : `.axes.SubplotBase`, or another subclass of `~.axes.Axes`
 
             The axes of the subplot. The returned axes base class depends on
             the projection used. It is `~.axes.Axes` if rectilinear projection
@@ -1284,14 +1298,10 @@ default: 'top'
         *kwargs*) then it will simply make that subplot current and
         return it.  This behavior is deprecated. Meanwhile, if you do
         not want this behavior (i.e., you want to force the creation of a
-        new suplot), you must use a unique set of args and kwargs.  The axes
+        new subplot), you must use a unique set of args and kwargs.  The axes
         *label* attribute has been exposed for this purpose: if you want
         two subplots that are otherwise identical to be added to the figure,
         make sure you give them unique labels.
-
-        In rare circumstances, `.add_subplot` may be called with a single
-        argument, a subplot axes instance already created in the
-        present figure but not in the figure's list of axes.
 
         See Also
         --------
@@ -1305,35 +1315,33 @@ default: 'top'
         --------
         ::
 
-            fig=plt.figure()
-            fig.add_subplot(221)
+            fig = plt.figure()
 
-            # equivalent but more general
-            ax1=fig.add_subplot(2, 2, 1)
+            fig.add_subplot(231)
+            ax1 = fig.add_subplot(2, 3, 1)  # equivalent but more general
 
-            # add a subplot with no frame
-            ax2=fig.add_subplot(222, frameon=False)
+            fig.add_subplot(232, frameon=False)  # subplot with no frame
+            fig.add_subplot(233, projection='polar')  # polar subplot
+            fig.add_subplot(234, sharex=ax1)  # subplot sharing x-axis with ax1
+            fig.add_subplot(235, facecolor="red")  # red subplot
 
-            # add a polar subplot
-            fig.add_subplot(223, projection='polar')
-
-            # add a red subplot that share the x-axis with ax1
-            fig.add_subplot(224, sharex=ax1, facecolor='red')
-
-            #delete x2 from the figure
-            fig.delaxes(ax2)
-
-            #add x2 to the figure again
-            fig.add_subplot(ax2)
+            ax1.remove()  # delete ax1 from the figure
+            fig.add_subplot(ax1)  # add ax1 back to the figure
         """
         if not len(args):
-            return
+            args = (1, 1, 1)
 
         if len(args) == 1 and isinstance(args[0], Integral):
             if not 100 <= args[0] <= 999:
                 raise ValueError("Integer subplot specification must be a "
                                  "three-digit number, not {}".format(args[0]))
             args = tuple(map(int, str(args[0])))
+
+        if 'figure' in kwargs:
+            # Axes itself allows for a 'figure' kwarg, but since we want to
+            # bind the created Axes to self, it is not allowed here.
+            raise TypeError(
+                "add_subplot() got an unexpected keyword argument 'figure'")
 
         if isinstance(args[0], SubplotBase):
 
@@ -1345,8 +1353,8 @@ default: 'top'
             # in the hash)
             key = self._make_key(*args, **kwargs)
         else:
-            projection_class, kwargs, key = process_projection_requirements(
-                self, *args, **kwargs)
+            projection_class, kwargs, key = \
+                self._process_projection_requirements(*args, **kwargs)
 
             # try to find the axes with this key in the stack
             ax = self._axstack.get(key)
@@ -1365,12 +1373,17 @@ default: 'top'
                     self._axstack.remove(ax)
 
             a = subplot_class_factory(projection_class)(self, *args, **kwargs)
-        self._axstack.add(key, a)
-        self.sca(a)
-        a._remove_method = self._remove_ax
+
+        return self._add_axes_internal(key, a)
+
+    def _add_axes_internal(self, key, ax):
+        """Private helper for `add_axes` and `add_subplot`."""
+        self._axstack.add(key, ax)
+        self.sca(ax)
+        ax._remove_method = self.delaxes
         self.stale = True
-        a.stale_callback = _stale_figure_callback
-        return a
+        ax.stale_callback = _stale_figure_callback
+        return ax
 
     def subplots(self, nrows=1, ncols=1, sharex=False, sharey=False,
                  squeeze=True, subplot_kw=None, gridspec_kw=None):
@@ -1389,12 +1402,10 @@ default: 'top'
             Controls sharing of properties among x (`sharex`) or y (`sharey`)
             axes:
 
-                - True or 'all': x- or y-axis will be shared among all
-                  subplots.
-                - False or 'none': each subplot x- or y-axis will be
-                  independent.
-                - 'row': each subplot row will share an x- or y-axis.
-                - 'col': each subplot column will share an x- or y-axis.
+            - True or 'all': x- or y-axis will be shared among all subplots.
+            - False or 'none': each subplot x- or y-axis will be independent.
+            - 'row': each subplot row will share an x- or y-axis.
+            - 'col': each subplot column will share an x- or y-axis.
 
             When subplots have a shared x-axis along a column, only the x tick
             labels of the bottom subplot are created. Similarly, when subplots
@@ -1406,12 +1417,11 @@ default: 'top'
             - If True, extra dimensions are squeezed out from the returned
               array of Axes:
 
-                - if only one subplot is constructed (nrows=ncols=1), the
-                  resulting single Axes object is returned as a scalar.
-                - for Nx1 or 1xM subplots, the returned object is a 1D numpy
-                  object array of Axes objects.
-                - for NxM, subplots with N>1 and M>1 are returned
-                  as a 2D array.
+              - if only one subplot is constructed (nrows=ncols=1), the
+                resulting single Axes object is returned as a scalar.
+              - for Nx1 or 1xM subplots, the returned object is a 1D numpy
+                object array of Axes objects.
+              - for NxM, subplots with N>1 and M>1 are returned as a 2D array.
 
             - If False, no squeezing at all is done: the returned Axes object
               is always a 2D array containing Axes instances, even if it ends
@@ -1446,19 +1456,18 @@ default: 'top'
             # Create a figure
             plt.figure()
 
-            # Creates a subplot
+            # Create a subplot
             ax = fig.subplots()
             ax.plot(x, y)
             ax.set_title('Simple plot')
 
-            # Creates two subplots and unpacks the output array immediately
+            # Create two subplots and unpack the output array immediately
             ax1, ax2 = fig.subplots(1, 2, sharey=True)
             ax1.plot(x, y)
             ax1.set_title('Sharing Y axis')
             ax2.scatter(x, y)
 
-            # Creates four polar axes, and accesses them through the
-            # returned array
+            # Create four polar axes and access them through the returned array
             axes = fig.subplots(2, 2, subplot_kw=dict(polar=True))
             axes[0, 0].plot(x, y)
             axes[1, 1].scatter(x, y)
@@ -1475,34 +1484,28 @@ default: 'top'
             # Note that this is the same as
             fig.subplots(2, 2, sharex=True, sharey=True)
 
-            See Also
-            --------
-            .pyplot.subplots
-            .Figure.add_subplot
-            .pyplot.subplot
-            """
+        See Also
+        --------
+        .pyplot.subplots
+        .Figure.add_subplot
+        .pyplot.subplot
+        """
 
         if isinstance(sharex, bool):
             sharex = "all" if sharex else "none"
         if isinstance(sharey, bool):
             sharey = "all" if sharey else "none"
-        share_values = ["all", "row", "col", "none"]
-        if sharex not in share_values:
-            # This check was added because it is very easy to type
-            # `subplots(1, 2, 1)` when `subplot(1, 2, 1)` was intended.
-            # In most cases, no error will ever occur, but mysterious behavior
-            # will result because what was intended to be the subplot index is
-            # instead treated as a bool for sharex.
-            if isinstance(sharex, Integral):
-                warnings.warn(
-                    "sharex argument to subplots() was an integer. "
-                    "Did you intend to use subplot() (without 's')?")
-
-            raise ValueError("sharex [%s] must be one of %s" %
-                             (sharex, share_values))
-        if sharey not in share_values:
-            raise ValueError("sharey [%s] must be one of %s" %
-                             (sharey, share_values))
+        # This check was added because it is very easy to type
+        # `subplots(1, 2, 1)` when `subplot(1, 2, 1)` was intended.
+        # In most cases, no error will ever occur, but mysterious behavior
+        # will result because what was intended to be the subplot index is
+        # instead treated as a bool for sharex.
+        if isinstance(sharex, Integral):
+            cbook._warn_external(
+                "sharex argument to subplots() was an integer.  Did you "
+                "intend to use subplot() (without 's')?")
+        cbook._check_in_list(["all", "row", "col", "none"],
+                             sharex=sharex, sharey=sharey)
         if subplot_kw is None:
             subplot_kw = {}
         if gridspec_kw is None:
@@ -1550,12 +1553,42 @@ default: 'top'
             # Returned axis array will be always 2-d, even if nrows=ncols=1.
             return axarr
 
-    def _remove_ax(self, ax):
-        def _reset_loc_form(axis):
-            axis.set_major_formatter(axis.get_major_formatter())
-            axis.set_major_locator(axis.get_major_locator())
-            axis.set_minor_formatter(axis.get_minor_formatter())
-            axis.set_minor_locator(axis.get_minor_locator())
+    def delaxes(self, ax):
+        """
+        Remove the `~.axes.Axes` *ax* from the figure; update the current axes.
+        """
+
+        def _reset_locators_and_formatters(axis):
+            # Set the formatters and locators to be associated with axis
+            # (where previously they may have been associated with another
+            # Axis isntance)
+            #
+            # Because set_major_formatter() etc. force isDefault_* to be False,
+            # we have to manually check if the original formatter was a
+            # default and manually set isDefault_* if that was the case.
+            majfmt = axis.get_major_formatter()
+            isDefault = majfmt.axis.isDefault_majfmt
+            axis.set_major_formatter(majfmt)
+            if isDefault:
+                majfmt.axis.isDefault_majfmt = True
+
+            majloc = axis.get_major_locator()
+            isDefault = majloc.axis.isDefault_majloc
+            axis.set_major_locator(majloc)
+            if isDefault:
+                majloc.axis.isDefault_majloc = True
+
+            minfmt = axis.get_minor_formatter()
+            isDefault = majloc.axis.isDefault_minfmt
+            axis.set_minor_formatter(minfmt)
+            if isDefault:
+                minfmt.axis.isDefault_minfmt = True
+
+            minloc = axis.get_minor_locator()
+            isDefault = majloc.axis.isDefault_minloc
+            axis.set_minor_locator(minloc)
+            if isDefault:
+                minloc.axis.isDefault_minloc = True
 
         def _break_share_link(ax, grouper):
             siblings = grouper.get_siblings(ax)
@@ -1566,14 +1599,18 @@ default: 'top'
                         return last_ax
             return None
 
-        self.delaxes(ax)
+        self._axstack.remove(ax)
+        for func in self._axobservers:
+            func(self)
+        self.stale = True
+
         last_ax = _break_share_link(ax, ax._shared_y_axes)
         if last_ax is not None:
-            _reset_loc_form(last_ax.yaxis)
+            _reset_locators_and_formatters(last_ax.yaxis)
 
         last_ax = _break_share_link(ax, ax._shared_x_axes)
         if last_ax is not None:
-            _reset_loc_form(last_ax.xaxis)
+            _reset_locators_and_formatters(last_ax.xaxis)
 
     def clf(self, keep_observers=False):
         """
@@ -1618,33 +1655,47 @@ default: 'top'
         Render the figure using :class:`matplotlib.backend_bases.RendererBase`
         instance *renderer*.
         """
+        self._cachedRenderer = renderer
 
         # draw the figure bounding box, perhaps none for white figure
         if not self.get_visible():
             return
 
+        artists = self.get_children()
+        artists.remove(self.patch)
         artists = sorted(
-            (artist for artist in (self.patches + self.lines + self.artists
-                                   + self.images + self.axes + self.texts
-                                   + self.legends)
-             if not artist.get_animated()),
+            (artist for artist in artists if not artist.get_animated()),
             key=lambda artist: artist.get_zorder())
 
+        for ax in self.axes:
+            locator = ax.get_axes_locator()
+            if locator:
+                pos = locator(ax, renderer)
+                ax.apply_aspect(pos)
+            else:
+                ax.apply_aspect()
+
+            for child in ax.get_children():
+                if hasattr(child, 'apply_aspect'):
+                    locator = child.get_axes_locator()
+                    if locator:
+                        pos = locator(child, renderer)
+                        child.apply_aspect(pos)
+                    else:
+                        child.apply_aspect()
+
         try:
-            renderer.open_group('figure')
+            renderer.open_group('figure', gid=self.get_gid())
             if self.get_constrained_layout() and self.axes:
                 self.execute_constrained_layout(renderer)
             if self.get_tight_layout() and self.axes:
                 try:
-                    self.tight_layout(renderer,
-                                      **self._tight_parameters)
+                    self.tight_layout(**self._tight_parameters)
                 except ValueError:
                     pass
                     # ValueError can occur when resizing a window.
 
-            if self.frameon:
-                self.patch.draw(renderer)
-
+            self.patch.draw(renderer)
             mimage._draw_list_compositing_images(
                 renderer, self, artists, self.suppressComposite)
 
@@ -1652,7 +1703,6 @@ default: 'top'
         finally:
             self.stale = False
 
-        self._cachedRenderer = renderer
         self.canvas.draw_event(renderer)
 
     def draw_artist(self, a):
@@ -1706,8 +1756,7 @@ default: 'top'
 
         Parameters
         ----------
-
-        handles : sequence of `.Artist`, optional
+        handles : list of `.Artist`, optional
             A list of Artists (lines, patches) to be added to the legend.
             Use this together with *labels*, if you need full control on what
             is shown in the legend and the automatic mechanism described above
@@ -1716,7 +1765,7 @@ default: 'top'
             The length of handles and labels should be the same in this
             case. If they are not, they are truncated to the smaller length.
 
-        labels : sequence of strings, optional
+        labels : list of str, optional
             A list of labels to show next to the artists.
             Use this together with *handles*, if you need full control on what
             is shown in the legend and the automatic mechanism described above
@@ -1724,7 +1773,6 @@ default: 'top'
 
         Other Parameters
         ----------------
-
         %(_legend_kw_doc)s
 
         Returns
@@ -1745,7 +1793,7 @@ default: 'top'
         if len(extra_args):
             # cbook.warn_deprecated(
             #     "2.1",
-            #     "Figure.legend will accept no more than two "
+            #     message="Figure.legend will accept no more than two "
             #     "positional arguments in the future.  Use "
             #     "'fig.legend(handles, labels, loc=location)' "
             #     "instead.")
@@ -1758,6 +1806,7 @@ default: 'top'
         self.stale = True
         return l
 
+    @cbook._delete_parameter("3.1", "withdash")
     @docstring.dedent_interpd
     def text(self, x, y, s, fontdict=None, withdash=False, **kwargs):
         """
@@ -1786,6 +1835,7 @@ default: 'top'
         ----------------
         **kwargs : `~matplotlib.text.Text` properties
             Other miscellaneous text parameters.
+
             %(Text)s
 
         Returns
@@ -1799,7 +1849,8 @@ default: 'top'
         """
         default = dict(transform=self.transFigure)
 
-        if withdash:
+        if (withdash
+                and withdash is not cbook.deprecation._deprecated_parameter):
             text = TextWithDash(x=x, y=y, text=s)
         else:
             text = Text(x=x, y=y, text=s)
@@ -1836,7 +1887,7 @@ default: 'top'
 
         """
         ckey, cax = self._axstack.current_key_axes()
-        # if there exists an axes on the stack see if it maches
+        # if there exists an axes on the stack see if it matches
         # the desired axes configuration
         if cax is not None:
 
@@ -1848,8 +1899,8 @@ default: 'top'
             # if the user has specified particular projection detail
             # then build up a key which can represent this
             else:
-                projection_class, _, key = process_projection_requirements(
-                    self, **kwargs)
+                projection_class, _, key = \
+                    self._process_projection_requirements(**kwargs)
 
                 # let the returned axes have any gridspec by removing it from
                 # the key
@@ -1861,9 +1912,10 @@ default: 'top'
                 if key == ckey and isinstance(cax, projection_class):
                     return cax
                 else:
-                    warnings.warn('Requested projection is different from '
-                                  'current axis projection, creating new axis '
-                                  'with requested projection.', stacklevel=2)
+                    cbook._warn_external('Requested projection is different '
+                                         'from current axis projection, '
+                                         'creating new axis with requested '
+                                         'projection.')
 
         # no axes found, so create one which spans the figure
         return self.add_subplot(1, 1, 1, **kwargs)
@@ -1876,8 +1928,21 @@ default: 'top'
         return a
 
     def _gci(self):
+        # Helper for `~matplotlib.pyplot.gci`.  Do not use elsewhere.
         """
-        Helper for :func:`~matplotlib.pyplot.gci`. Do not use elsewhere.
+        Get the current colorable artist.
+
+        Specifically, returns the current `.ScalarMappable` instance (`.Image`
+        created by `imshow` or `figimage`, `.Collection` created by `pcolor` or
+        `scatter`, etc.), or *None* if no such instance has been defined.
+
+        The current image is an attribute of the current axes, or the nearest
+        earlier axes in the current figure that contains an image.
+
+        Notes
+        -----
+        Historically, the only colorable artists were images; hence the name
+        ``gci`` (get current image).
         """
         # Look first for an image in the current Axes:
         cax = self._axstack.current_key_axes()[1]
@@ -1930,9 +1995,9 @@ default: 'top'
         restore_to_pylab = state.pop('_restore_to_pylab', False)
 
         if version != _mpl_version:
-            warnings.warn("This figure was saved with matplotlib version %s "
-                          "and is unlikely to function correctly." %
-                          (version, ))
+            cbook._warn_external(
+                f"This figure was saved with matplotlib version {version} and "
+                f"is unlikely to function correctly.")
 
         self.__dict__ = state
 
@@ -1972,7 +2037,7 @@ default: 'top'
         """Whenever the axes state change, ``func(self)`` will be called."""
         self._axobservers.append(func)
 
-    def savefig(self, fname, *, frameon=None, transparent=None, **kwargs):
+    def savefig(self, fname, *, transparent=None, **kwargs):
         """
         Save the current figure.
 
@@ -1983,53 +2048,52 @@ default: 'top'
                   transparent=False, bbox_inches=None, pad_inches=0.1,
                   frameon=None, metadata=None)
 
-        The output formats available depend on the backend being used.
+        The available output formats depend on the backend being used.
 
         Parameters
         ----------
+        fname : str or PathLike or file-like object
+            A path, or a Python file-like object, or
+            possibly some backend-dependent object such as
+            `matplotlib.backends.backend_pdf.PdfPages`.
 
-        fname : str or file-like object
-            A string containing a path to a filename, or a Python
-            file-like object, or possibly some backend-dependent object
-            such as :class:`~matplotlib.backends.backend_pdf.PdfPages`.
+            If *format* is not set, then the output format is inferred from
+            the extension of *fname*, if any, and from :rc:`savefig.format`
+            otherwise.  If *format* is set, it determines the output format.
 
-            If *format* is *None* and *fname* is a string, the output
-            format is deduced from the extension of the filename. If
-            the filename has no extension, :rc:`savefig.format` is used.
-
-            If *fname* is not a string, remember to specify *format* to
-            ensure that the correct backend is used.
+            Hence, if *fname* is not a path or has no extension, remember to
+            specify *format* to ensure that the correct backend is used.
 
         Other Parameters
         ----------------
+        dpi : float or 'figure', default: :rc:`savefig.dpi`
+            The resolution in dots per inch.  If 'figure', use the figure's
+            dpi value.
 
-        dpi : [ *None* | scalar > 0 | 'figure' ]
-            The resolution in dots per inch.  If *None*, defaults to
-            :rc:`savefig.dpi`.  If 'figure', uses the figure's dpi value.
+        quality : int, default: :rc:`savefig.jpeg_quality`
+            Applicable only if *format* is 'jpg' or 'jpeg', ignored otherwise.
 
-        quality : [ *None* | 1 <= scalar <= 100 ]
             The image quality, on a scale from 1 (worst) to 95 (best).
-            Applicable only if *format* is jpg or jpeg, ignored otherwise.
-            If *None*, defaults to :rc:`savefig.jpeg_quality` (95 by default).
-            Values above 95 should be avoided; 100 completely disables the
-            JPEG quantization stage.
+            Values above 95 should be avoided; 100 disables portions of
+            the JPEG compression algorithm, and results in large files
+            with hardly any gain in image quality.
 
-        optimize : bool
-            If *True*, indicates that the JPEG encoder should make an extra
-            pass over the image in order to select optimal encoder settings.
-            Applicable only if *format* is jpg or jpeg, ignored otherwise.
-            Is *False* by default.
+        optimize : bool, default: False
+            Applicable only if *format* is 'jpg' or 'jpeg', ignored otherwise.
 
-        progressive : bool
-            If *True*, indicates that this image should be stored as a
-            progressive JPEG file. Applicable only if *format* is jpg or
-            jpeg, ignored otherwise. Is *False* by default.
+            Whether the encoder should make an extra pass over the image
+            in order to select optimal encoder settings.
 
-        facecolor : color spec or None, optional
+        progressive : bool, default: False
+            Applicable only if *format* is 'jpg' or 'jpeg', ignored otherwise.
+
+            Whether the image should be stored as a progressive JPEG file.
+
+        facecolor : color or None, optional
             The facecolor of the figure; if *None*, defaults to
             :rc:`savefig.facecolor`.
 
-        edgecolor : color spec or None, optional
+        edgecolor : color or None, optional
             The edgecolor of the figure; if *None*, defaults to
             :rc:`savefig.edgecolor`
 
@@ -2042,8 +2106,8 @@ default: 'top'
             output.
 
         format : str
-            One of the file extensions supported by the active
-            backend.  Most backends support png, pdf, ps, eps and svg.
+            The file format, e.g. 'png', 'pdf', 'svg', ... The behavior when
+            this is unset is documented under *fname*.
 
         transparent : bool
             If *True*, the axes patches will all be transparent; the
@@ -2053,11 +2117,6 @@ default: 'top'
             a plot on top of a colored background on a web page.  The
             transparency of these patches will be restored to their
             original values upon exit of this function.
-
-        frameon : bool
-            If *True*, the figure patch will be colored, if *False*, the
-            figure background will be transparent.  If not provided, the
-            rcParam 'savefig.frameon' will be used.
 
         bbox_inches : str or `~matplotlib.transforms.Bbox`, optional
             Bbox in inches. Only the given portion of the figure is
@@ -2082,10 +2141,22 @@ default: 'top'
               `~.backend_pdf.PdfPages`.
             - 'eps' and 'ps' with PS backend: Only 'Creator' is supported.
 
+        pil_kwargs : dict, optional
+            Additional keyword arguments that are passed to `PIL.Image.save`
+            when saving the figure.  Only applicable for formats that are saved
+            using Pillow, i.e. JPEG, TIFF, and (if the keyword is set to a
+            non-None value) PNG.
         """
+
         kwargs.setdefault('dpi', rcParams['savefig.dpi'])
-        if frameon is None:
-            frameon = rcParams['savefig.frameon']
+        if "frameon" in kwargs:
+            cbook.warn_deprecated("3.1", name="frameon", obj_type="kwarg",
+                                  alternative="facecolor")
+            frameon = kwargs.pop("frameon")
+            if frameon is None:
+                frameon = dict.__getitem__(rcParams, 'savefig.frameon')
+        else:
+            frameon = False  # Won't pass "if frameon:" below.
         if transparent is None:
             transparent = rcParams['savefig.transparent']
 
@@ -2104,13 +2175,13 @@ default: 'top'
             kwargs.setdefault('edgecolor', rcParams['savefig.edgecolor'])
 
         if frameon:
-            original_frameon = self.get_frameon()
-            self.set_frameon(frameon)
+            original_frameon = self.patch.get_visible()
+            self.patch.set_visible(frameon)
 
         self.canvas.print_figure(fname, **kwargs)
 
         if frameon:
-            self.set_frameon(original_frameon)
+            self.patch.set_visible(original_frameon)
 
         if transparent:
             for ax, cc in zip(self.axes, original_axes_colors):
@@ -2157,10 +2228,11 @@ default: 'top'
         """
         if self.get_constrained_layout():
             self.set_constrained_layout(False)
-            warnings.warn("This figure was using constrained_layout==True, "
-                          "but that is incompatible with subplots_adjust and "
-                          "or tight_layout: setting "
-                          "constrained_layout==False. ")
+            cbook._warn_external("This figure was using "
+                                 "constrained_layout==True, but that is "
+                                 "incompatible with subplots_adjust and or "
+                                 "tight_layout: setting "
+                                 "constrained_layout==False. ")
         self.subplotpars.update(left, bottom, right, top, wspace, hspace)
         for ax in self.axes:
             if not isinstance(ax, SubplotBase):
@@ -2207,7 +2279,7 @@ default: 'top'
         timeout : scalar, optional, default: 30
             Number of seconds to wait before timing out. If zero or negative
             will never timeout.
-        show_clicks : bool, optional, default: False
+        show_clicks : bool, optional, default: True
             If True, show a red cross at the location of each click.
         mouse_add : {1, 2, 3, None}, optional, default: 1 (left click)
             Mouse button used to add points.
@@ -2229,7 +2301,6 @@ default: 'top'
         terminates input and any other key (not already used by the window
         manager) selects a point.
         """
-
         blocking_mouse_input = BlockingMouseInput(self,
                                                   mouse_add=mouse_add,
                                                   mouse_pop=mouse_pop,
@@ -2241,13 +2312,10 @@ default: 'top'
         """
         Blocking call to interact with the figure.
 
-        This will return True is a key was pressed, False if a mouse
-        button was pressed and None if *timeout* was reached without
-        either being pressed.
-
-        If *timeout* is negative, does not timeout.
+        Wait for user input and return True if a key was pressed, False if a
+        mouse button was pressed and None if no input was given within
+        *timeout* seconds.  Negative values deactivate *timeout*.
         """
-
         blocking_input = BlockingKeyMouseInput(self)
         return blocking_input(timeout=timeout)
 
@@ -2257,8 +2325,6 @@ default: 'top'
         for ax in self.axes:
             if ax.get_visible():
                 bbox_artists.extend(ax.get_default_bbox_extra_artists())
-        # we don't want the figure's patch to influence the bbox calculation
-        bbox_artists.remove(self.patch)
         return bbox_artists
 
     def get_tightbbox(self, renderer, bbox_extra_artists=None):
@@ -2296,17 +2362,26 @@ default: 'top'
             if bbox is not None and (bbox.width != 0 or bbox.height != 0):
                 bb.append(bbox)
 
-        bb.extend(
-            ax.get_tightbbox(renderer, bbox_extra_artists=bbox_extra_artists)
-            for ax in self.axes if ax.get_visible())
+        for ax in self.axes:
+            if ax.get_visible():
+                # some axes don't take the bbox_extra_artists kwarg so we
+                # need this conditional....
+                try:
+                    bbox = ax.get_tightbbox(renderer,
+                            bbox_extra_artists=bbox_extra_artists)
+                except TypeError:
+                    bbox = ax.get_tightbbox(renderer)
+                bb.append(bbox)
+        bb = [b for b in bb
+              if (np.isfinite(b.width) and np.isfinite(b.height)
+                  and (b.width != 0 or b.height != 0))]
 
         if len(bb) == 0:
             return self.bbox_inches
 
-        _bbox = Bbox.union([b for b in bb if b.width != 0 or b.height != 0])
+        _bbox = Bbox.union(bb)
 
-        bbox_inches = TransformedBbox(_bbox,
-                                      Affine2D().scale(1. / self.dpi))
+        bbox_inches = TransformedBbox(_bbox, Affine2D().scale(1 / self.dpi))
 
         return bbox_inches
 
@@ -2329,11 +2404,12 @@ default: 'top'
 
         _log.debug('Executing constrainedlayout')
         if self._layoutbox is None:
-            warnings.warn("Calling figure.constrained_layout, but figure not "
-                          "setup to do constrained layout.  You either called "
-                          "GridSpec without the fig keyword, you are using "
-                          "plt.subplot, or you need to call figure or "
-                          "subplots with the constrained_layout=True kwarg.")
+            cbook._warn_external("Calling figure.constrained_layout, but "
+                                 "figure not setup to do constrained layout. "
+                                 " You either called GridSpec without the "
+                                 "fig keyword, you are using plt.subplot, "
+                                 "or you need to call figure or subplots "
+                                 "with the constrained_layout=True kwarg.")
             return
         w_pad, h_pad, wspace, hspace = self.get_constrained_layout_pads()
         # convert to unit-relative lengths
@@ -2345,6 +2421,7 @@ default: 'top'
             renderer = layoutbox.get_renderer(fig)
         do_constrained_layout(fig, renderer, h_pad, w_pad, hspace, wspace)
 
+    @cbook._delete_parameter("3.2", "renderer")
     def tight_layout(self, renderer=None, pad=1.08, h_pad=None, w_pad=None,
                      rect=None):
         """
@@ -2352,13 +2429,12 @@ default: 'top'
 
         To exclude an artist on the axes from the bounding box calculation
         that determines the subplot parameters (i.e. legend, or annotation),
-        then set `a.set_in_layout(False)` for that artist.
+        set `a.set_in_layout(False)` for that artist.
 
         Parameters
         ----------
         renderer : subclass of `~.backend_bases.RendererBase`, optional
-            Defaults to the renderer for the figure.
-
+            Defaults to the renderer for the figure.  Deprecated.
         pad : float, optional
             Padding between the figure edge and the edges of subplots,
             as a fraction of the font size.
@@ -2381,8 +2457,9 @@ default: 'top'
 
         subplotspec_list = get_subplotspec_list(self.axes)
         if None in subplotspec_list:
-            warnings.warn("This figure includes Axes that are not compatible "
-                          "with tight_layout, so results might be incorrect.")
+            cbook._warn_external("This figure includes Axes that are not "
+                                 "compatible with tight_layout, so results "
+                                 "might be incorrect.")
 
         if renderer is None:
             renderer = get_renderer(self)
@@ -2390,7 +2467,8 @@ default: 'top'
         kwargs = get_tight_layout_figure(
             self, self.axes, subplotspec_list, renderer,
             pad=pad, h_pad=h_pad, w_pad=w_pad, rect=rect)
-        self.subplots_adjust(**kwargs)
+        if kwargs:
+            self.subplots_adjust(**kwargs)
 
     def align_xlabels(self, axs=None):
         """
@@ -2572,7 +2650,8 @@ default: 'top'
 
         Other Parameters
         ----------------
-        *kwargs* are passed to `.GridSpec`.
+        **kwargs
+            Keyword arguments are passed to `.GridSpec`.
 
         See Also
         --------
@@ -2638,7 +2717,7 @@ def figaspect(arg):
 
     Make a figure with the proper aspect for an array::
 
-        A = rand(5,3)
+        A = rand(5, 3)
         w, h = figaspect(A)
         fig = Figure(figsize=(w, h))
         ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])

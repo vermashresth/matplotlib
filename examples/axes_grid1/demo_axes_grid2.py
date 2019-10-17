@@ -5,11 +5,15 @@ Demo Axes Grid2
 
 Grid of images with shared xaxis and yaxis.
 """
+
 import numpy as np
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.colors
+
+
+plt.rcParams["mpl_toolkits.legacy_colorbar"] = False
 
 
 def get_demo_image():
@@ -20,16 +24,15 @@ def get_demo_image():
     return z, (-3, 4, -4, 3)
 
 
-def add_inner_title(ax, title, loc, size=None, **kwargs):
+def add_inner_title(ax, title, loc, **kwargs):
     from matplotlib.offsetbox import AnchoredText
     from matplotlib.patheffects import withStroke
-    if size is None:
-        size = dict(size=plt.rcParams['legend.fontsize'])
-    at = AnchoredText(title, loc=loc, prop=size,
+    prop = dict(path_effects=[withStroke(foreground='w', linewidth=3)],
+                size=plt.rcParams['legend.fontsize'])
+    at = AnchoredText(title, loc=loc, prop=prop,
                       pad=0., borderpad=0.5,
                       frameon=False, **kwargs)
     ax.add_artist(at)
-    at.txt._text.set_path_effects([withStroke(foreground="w", linewidth=3)])
     return at
 
 
@@ -54,10 +57,13 @@ grid = ImageGrid(fig, 211,  # similar to subplot(211)
                  cbar_pad="1%",
                  )
 
-for ax, z in zip(grid, ZS):
+for i, (ax, z) in enumerate(zip(grid, ZS)):
     im = ax.imshow(
         z, origin="lower", extent=extent, interpolation="nearest")
-    ax.cax.colorbar(im)
+    cb = ax.cax.colorbar(im)
+    # Changing the colorbar ticks
+    if i in [1, 2]:
+        cb.set_ticks([-1, 0, 1])
 
 for ax, im_title in zip(grid, ["Image 1", "Image 2", "Image 3"]):
     t = add_inner_title(ax, im_title, loc='lower left')
@@ -69,10 +75,6 @@ for ax, z in zip(grid, ZS):
     #axis.label.set_text("counts s$^{-1}$")
     #axis.label.set_size(10)
     #axis.major_ticklabels.set_size(6)
-
-# Changing the colorbar ticks
-grid[1].cax.set_xticks([-1, 0, 1])
-grid[2].cax.set_xticks([-1, 0, 1])
 
 grid[0].set_xticks([-2, 0])
 grid[0].set_yticks([-2, 0, 2])

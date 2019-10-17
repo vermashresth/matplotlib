@@ -3,7 +3,7 @@ from matplotlib.artist import Artist
 from matplotlib.axis import XAxis, YAxis
 
 
-class SimpleChainedObjects(object):
+class SimpleChainedObjects:
     def __init__(self, objects):
         self._objects = objects
 
@@ -11,9 +11,9 @@ class SimpleChainedObjects(object):
         _a = SimpleChainedObjects([getattr(a, k) for a in self._objects])
         return _a
 
-    def __call__(self, *kl, **kwargs):
+    def __call__(self, *args, **kwargs):
         for m in self._objects:
-            m(*kl, **kwargs)
+            m(*args, **kwargs)
 
 
 class Axes(maxes.Axes):
@@ -26,8 +26,8 @@ class Axes(maxes.Axes):
         def __getitem__(self, k):
             if isinstance(k, tuple):
                 r = SimpleChainedObjects(
+                    # super() within a list comprehension needs explicit args.
                     [super(Axes.AxisDict, self).__getitem__(k1) for k1 in k])
-                    # super() within a list comprehension needs explicit args
                 return r
             elif isinstance(k, slice):
                 if k.start is None and k.stop is None and k.step is None:
@@ -70,7 +70,8 @@ class SimpleAxisArtist(Artist):
         elif isinstance(axis, YAxis):
             self._axis_direction = ["left", "right"][axisnum-1]
         else:
-            raise ValueError("axis must be instance of XAxis or YAxis : %s is provided" % (axis,))
+            raise ValueError(
+                f"axis must be instance of XAxis or YAxis, but got {axis}")
         Artist.__init__(self)
 
     @property
@@ -131,11 +132,3 @@ class SimpleAxisArtist(Artist):
             elif _label:
                 self._axis.label.set_visible(True)
                 self._axis.set_label_position(self._axis_direction)
-
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    fig = plt.figure()
-    ax = Axes(fig, [0.1, 0.1, 0.8, 0.8])
-    fig.add_axes(ax)
-    ax.cla()

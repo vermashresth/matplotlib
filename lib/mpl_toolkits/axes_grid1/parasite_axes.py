@@ -1,6 +1,6 @@
 import functools
 
-from matplotlib import artist as martist, transforms as mtransforms
+from matplotlib import artist as martist, cbook, transforms as mtransforms
 from matplotlib.axes import subplot_class_factory
 from matplotlib.transforms import Bbox
 from .mpl_axes import Axes
@@ -36,6 +36,18 @@ class ParasiteAxesBase:
             self.xaxis.set_zorder(2.5)
             self.yaxis.set_zorder(2.5)
 
+    def pick(self, mouseevent):
+        # This most likely goes to Artist.pick (depending on axes_class given
+        # to the factory), which only handles pick events registered on the
+        # axes associated with each child:
+        super().pick(mouseevent)
+        # But parasite axes are additionally given pick events from their host
+        # axes (cf. HostAxesBase.pick), which we handle here:
+        for a in self.get_children():
+            if (hasattr(mouseevent.inaxes, "parasites")
+                    and self in mouseevent.inaxes.parasites):
+                a.pick(mouseevent)
+
 
 @functools.lru_cache(None)
 def parasite_axes_class_factory(axes_class=None):
@@ -70,10 +82,8 @@ class ParasiteAxesAuxTransBase:
                 self.transAxes, self.transData)
 
     def set_viewlim_mode(self, mode):
-        if mode not in [None, "equal", "transform"]:
-            raise ValueError("Unknown mode: %s" % (mode,))
-        else:
-            self._viewlim_mode = mode
+        cbook._check_in_list([None, "equal", "transform"], mode=mode)
+        self._viewlim_mode = mode
 
     def get_viewlim_mode(self):
         return self._viewlim_mode
@@ -89,7 +99,7 @@ class ParasiteAxesAuxTransBase:
             self.axes.viewLim.set(
                 viewlim.transformed(self.transAux.inverted()))
         else:
-            raise ValueError("Unknown mode: %s" % (self._viewlim_mode,))
+            cbook._check_in_list([None, "equal", "transform"], mode=mode)
 
     def _pcolor(self, super_pcolor, *XYC, **kwargs):
         if len(XYC) == 1:
@@ -188,7 +198,7 @@ class HostAxesBase:
         parasite_axes_class = parasite_axes_auxtrans_class_factory(axes_class)
         ax2 = parasite_axes_class(self, tr, viewlim_mode)
         # note that ax2.transData == tr + ax1.transData
-        # Anthing you draw in ax2 will match the ticks and grids of ax1.
+        # Anything you draw in ax2 will match the ticks and grids of ax1.
         self.parasites.append(ax2)
         ax2._remove_method = self.parasites.remove
         return ax2
@@ -232,14 +242,20 @@ class HostAxesBase:
             ax.cla()
         super().cla()
 
+    def pick(self, mouseevent):
+        super().pick(mouseevent)
+        # Also pass pick events on to parasite axes and, in turn, their
+        # children (cf. ParasiteAxesBase.pick)
+        for a in self.parasites:
+            a.pick(mouseevent)
+
     def twinx(self, axes_class=None):
         """
-        create a twin of Axes for generating a plot with a sharex
-        x-axis but independent y axis.  The y-axis of self will have
-        ticks on left and the returned axes will have ticks on the
-        right
-        """
+        Create a twin of Axes with a shared x-axis but independent y-axis.
 
+        The y-axis of self will have ticks on the left and the returned axes
+        will have ticks on the right.
+        """
         if axes_class is None:
             axes_class = self._get_base_axes()
 
@@ -263,12 +279,11 @@ class HostAxesBase:
 
     def twiny(self, axes_class=None):
         """
-        create a twin of Axes for generating a plot with a shared
-        y-axis but independent x axis.  The x-axis of self will have
-        ticks on bottom and the returned axes will have ticks on the
-        top
-        """
+        Create a twin of Axes with a shared y-axis but independent x-axis.
 
+        The x-axis of self will have ticks on the bottom and the returned axes
+        will have ticks on the top.
+        """
         if axes_class is None:
             axes_class = self._get_base_axes()
 
@@ -292,12 +307,11 @@ class HostAxesBase:
 
     def twin(self, aux_trans=None, axes_class=None):
         """
-        create a twin of Axes for generating a plot with a sharex
-        x-axis but independent y axis.  The y-axis of self will have
-        ticks on left and the returned axes will have ticks on the
-        right
-        """
+        Create a twin of Axes with no shared axis.
 
+        While self will have ticks on the left and bottom axis, the returned
+        axes will have ticks on the top and right axis.
+        """
         if axes_class is None:
             axes_class = self._get_base_axes()
 
@@ -326,11 +340,13 @@ class HostAxesBase:
 
         return ax2
 
-    def get_tightbbox(self, renderer, call_axes_locator=True):
+    def get_tightbbox(self, renderer, call_axes_locator=True,
+                      bbox_extra_artists=None):
         bbs = [ax.get_tightbbox(renderer, call_axes_locator=call_axes_locator)
                for ax in self.parasites]
         bbs.append(super().get_tightbbox(renderer,
-                                         call_axes_locator=call_axes_locator))
+                call_axes_locator=call_axes_locator,
+                bbox_extra_artists=bbox_extra_artists))
         return Bbox.union([b for b in bbs if b.width != 0 or b.height != 0])
 
 

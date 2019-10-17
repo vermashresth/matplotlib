@@ -35,10 +35,12 @@ import matplotlib.colors as mcolors
 
 
 def update_from_first_child(tgt, src):
-    tgt.update_from(src.get_children()[0])
+    first_child = next(iter(src.get_children()), None)
+    if first_child is not None:
+        tgt.update_from(first_child)
 
 
-class HandlerBase(object):
+class HandlerBase:
     """
     A Base class for default legend handlers.
 
@@ -166,7 +168,7 @@ class HandlerNpoints(HandlerBase):
                                 numpoints)
             xdata_marker = xdata
         else:
-            xdata = np.linspace(-xdescent, -xdescent + width, 2)
+            xdata = [-xdescent, -xdescent + width]
             xdata_marker = [-xdescent + 0.5 * width]
         return xdata, xdata_marker
 
@@ -231,7 +233,7 @@ class HandlerLine2D(HandlerNpoints):
         xdata, xdata_marker = self.get_xdata(legend, xdescent, ydescent,
                                              width, height, fontsize)
 
-        ydata = ((height - ydescent) / 2.) * np.ones(xdata.shape, float)
+        ydata = np.full_like(xdata, ((height - ydescent) / 2))
         legline = Line2D(xdata, ydata)
 
         self.update_prop(legline, orig_handle, legend)
@@ -324,7 +326,7 @@ class HandlerLineCollection(HandlerLine2D):
 
         xdata, xdata_marker = self.get_xdata(legend, xdescent, ydescent,
                                              width, height, fontsize)
-        ydata = ((height - ydescent) / 2.) * np.ones(xdata.shape, float)
+        ydata = np.full_like(xdata, (height - ydescent) / 2)
         legline = Line2D(xdata, ydata)
 
         self.update_prop(legline, orig_handle, legend)
@@ -466,7 +468,7 @@ class HandlerErrorbar(HandlerLine2D):
         xdata, xdata_marker = self.get_xdata(legend, xdescent, ydescent,
                                              width, height, fontsize)
 
-        ydata = ((height - ydescent) / 2.) * np.ones(xdata.shape, float)
+        ydata = np.full_like(xdata, (height - ydescent) / 2)
         legline = Line2D(xdata, ydata)
 
         xdata_marker = np.asarray(xdata_marker)
@@ -534,15 +536,11 @@ class HandlerErrorbar(HandlerLine2D):
                 handle_caplines.append(capline_left)
                 handle_caplines.append(capline_right)
 
-        artists = []
-        artists.extend(handle_barlinecols)
-        artists.extend(handle_caplines)
-        artists.append(legline)
-        artists.append(legline_marker)
-
+        artists = [
+            *handle_barlinecols, *handle_caplines, legline, legline_marker,
+        ]
         for artist in artists:
             artist.set_transform(trans)
-
         return artists
 
 
@@ -589,8 +587,11 @@ class HandlerStem(HandlerNpointsYoffsets):
     def create_artists(self, legend, orig_handle,
                        xdescent, ydescent, width, height, fontsize,
                        trans):
-
         markerline, stemlines, baseline = orig_handle
+        # Check to see if the stemcontainer is storing lines as a list or a
+        # LineCollection. Eventually using a list will be removed, and this
+        # logic can also be removed.
+        using_linecoll = isinstance(stemlines, mcoll.LineCollection)
 
         xdata, xdata_marker = self.get_xdata(legend, xdescent, ydescent,
                                              width, height, fontsize)
@@ -606,27 +607,41 @@ class HandlerStem(HandlerNpointsYoffsets):
         leg_markerline = Line2D(xdata_marker, ydata[:len(xdata_marker)])
         self.update_prop(leg_markerline, markerline, legend)
 
-        leg_stemlines = []
-        for thisx, thisy in zip(xdata_marker, ydata):
-            l = Line2D([thisx, thisx], [bottom, thisy])
-            leg_stemlines.append(l)
+        leg_stemlines = [Line2D([x, x], [bottom, y])
+                         for x, y in zip(xdata_marker, ydata)]
 
-        for lm, m in zip(leg_stemlines, stemlines):
-            self.update_prop(lm, m, legend)
+        if using_linecoll:
+            # change the function used by update_prop() from the default
+            # to one that handles LineCollection
+            orig_update_func = self._update_prop_func
+            self._update_prop_func = self._copy_collection_props
+
+            for line in leg_stemlines:
+                self.update_prop(line, stemlines, legend)
+
+        else:
+            for lm, m in zip(leg_stemlines, stemlines):
+                self.update_prop(lm, m, legend)
+
+        if using_linecoll:
+            self._update_prop_func = orig_update_func
 
         leg_baseline = Line2D([np.min(xdata), np.max(xdata)],
                               [bottom, bottom])
-
         self.update_prop(leg_baseline, baseline, legend)
 
-        artists = [leg_markerline]
-        artists.extend(leg_stemlines)
-        artists.append(leg_baseline)
-
+        artists = [*leg_stemlines, leg_baseline, leg_markerline]
         for artist in artists:
             artist.set_transform(trans)
-
         return artists
+
+    def _copy_collection_props(self, legend_handle, orig_handle):
+        """
+        Method to copy properties from a LineCollection (orig_handle) to a
+        Line2D (legend_handle).
+        """
+        legend_handle.set_color(orig_handle.get_color()[0])
+        legend_handle.set_linestyle(orig_handle.get_linestyle()[0])
 
 
 class HandlerTuple(HandlerBase):

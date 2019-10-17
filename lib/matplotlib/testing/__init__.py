@@ -1,18 +1,25 @@
+"""
+Helper functions for testing.
+"""
+
 import locale
-import warnings
+import logging
 
 import matplotlib as mpl
-from matplotlib.cbook import MatplotlibDeprecationWarning
+from matplotlib import cbook
+
+_log = logging.getLogger(__name__)
 
 
+@cbook.deprecated("3.2")
 def is_called_from_pytest():
-    """Returns whether the call was done from pytest"""
+    """Whether we are in a pytest run."""
     return getattr(mpl, '_called_from_pytest', False)
 
 
 def set_font_settings_for_testing():
     mpl.rcParams['font.family'] = 'DejaVu Sans'
-    mpl.rcParams['text.hinting'] = False
+    mpl.rcParams['text.hinting'] = 'none'
     mpl.rcParams['text.hinting_factor'] = 8
 
 
@@ -30,14 +37,13 @@ def setup():
         try:
             locale.setlocale(locale.LC_ALL, 'English_United States.1252')
         except locale.Error:
-            warnings.warn(
+            _log.warning(
                 "Could not set locale to English/United States. "
                 "Some date-related tests may fail.")
 
-    mpl.use('Agg', force=True, warn=False)  # use Agg backend for these tests
+    mpl.use('Agg')
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", MatplotlibDeprecationWarning)
+    with cbook._suppress_matplotlib_deprecation_warning():
         mpl.rcdefaults()  # Start with all defaults
 
     # These settings *must* be hardcoded for running the comparison tests and

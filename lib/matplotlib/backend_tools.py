@@ -11,9 +11,11 @@ These tools are used by `matplotlib.backend_managers.ToolManager`
     `matplotlib.backend_managers.ToolManager`
 """
 
+from enum import IntEnum
+import logging
 import re
 import time
-import warnings
+from types import SimpleNamespace
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -22,17 +24,19 @@ from matplotlib import rcParams
 from matplotlib._pylab_helpers import Gcf
 import matplotlib.cbook as cbook
 
+_log = logging.getLogger(__name__)
 
-class Cursors(object):
-    """Simple namespace for cursor reference"""
+
+class Cursors(IntEnum):  # Must subclass int for the macOS backend.
+    """Backend-independent cursor types."""
     HAND, POINTER, SELECT_REGION, MOVE, WAIT = range(5)
-cursors = Cursors()
+cursors = Cursors  # Backcompat.
 
 # Views positions tool
 _views_positions = 'viewpos'
 
 
-class ToolBase(object):
+class ToolBase:
     """
     Base tool class
 
@@ -45,7 +49,7 @@ class ToolBase(object):
         ToolManager that controls this Tool
     figure : `FigureCanvas`
         Figure instance that is affected by this Tool
-    name : string
+    name : str
         Used as **Id** of the tool, has to be unique among tools of the same
         ToolManager
     """
@@ -71,13 +75,13 @@ class ToolBase(object):
     Filename of the image
 
     **String**: Filename of the image to use in the toolbar. If None, the
-    `name` is used as a label in the toolbar button
+    *name* is used as a label in the toolbar button
     """
 
     def __init__(self, toolmanager, name):
-        warnings.warn('Treat the new Tool classes introduced in v1.5 as ' +
-                      'experimental for now, the API will likely change in ' +
-                      'version 2.1, and some tools might change name')
+        cbook._warn_external(
+            'The new Tool classes introduced in v1.5 are experimental; their '
+            'API (including names) will likely change in future versions.')
         self._name = name
         self._toolmanager = toolmanager
         self._figure = None
@@ -99,6 +103,15 @@ class ToolBase(object):
     @property
     def toolmanager(self):
         return self._toolmanager
+
+    def _make_classic_style_pseudo_toolbar(self):
+        """
+        Return a placeholder object with a single `canvas` attribute.
+
+        This is useful to reuse the implementations of tools already provided
+        by the classic Toolbars.
+        """
+        return SimpleNamespace(canvas=self.canvas)
 
     def set_figure(self, figure):
         """
@@ -269,16 +282,15 @@ class SetCursorBase(ToolBase):
         self._set_cursor_cbk(event.canvasevent)
 
     def _add_tool(self, tool):
-        """set the cursor when the tool is triggered"""
+        """Set the cursor when the tool is triggered."""
         if getattr(tool, 'cursor', None) is not None:
             self.toolmanager.toolmanager_connect('tool_trigger_%s' % tool.name,
                                                  self._tool_trigger_cbk)
 
     def _add_tool_cbk(self, event):
-        """Process every newly added tool"""
+        """Process every newly added tool."""
         if event.tool is self:
             return
-
         self._add_tool(event.tool)
 
     def _set_cursor_cbk(self, event):
@@ -426,10 +438,11 @@ class ToolEnableNavigation(ToolBase):
             return
 
         n = int(event.key) - 1
-        for i, a in enumerate(self.figure.get_axes()):
-            if (event.x is not None and event.y is not None
-                    and a.in_axes(event)):
-                a.set_navigate(i == n)
+        if n < len(self.figure.get_axes()):
+            for i, a in enumerate(self.figure.get_axes()):
+                if (event.x is not None and event.y is not None
+                        and a.in_axes(event)):
+                    a.set_navigate(i == n)
 
 
 class _ToolGridBase(ToolBase):
@@ -851,7 +864,7 @@ class ToolZoom(ZoomPanBase):
         return
 
     def _press(self, event):
-        """the _press mouse button in zoom to rect mode callback"""
+        """Callback for mouse button presses in zoom-to-rectangle mode."""
 
         # If we're already in the middle of a zoom, pressing another
         # button works to "cancel"
@@ -893,7 +906,7 @@ class ToolZoom(ZoomPanBase):
         self._mouse_move(event)
 
     def _mouse_move(self, event):
-        """the drag callback in zoom mode"""
+        """Callback for mouse moves in zoom-to-rectangle mode."""
 
         if self._xypress:
             x, y = event.x, event.y
@@ -908,7 +921,7 @@ class ToolZoom(ZoomPanBase):
                 'rubberband', self, data=(x1, y1, x2, y2))
 
     def _release(self, event):
-        """the release mouse button callback in zoom to rect mode"""
+        """Callback for mouse button releases in zoom-to-rectangle mode."""
 
         for zoom_id in self._ids_zoom:
             self.figure.canvas.mpl_disconnect(zoom_id)
@@ -928,7 +941,7 @@ class ToolZoom(ZoomPanBase):
                 self._cancel_action()
                 return
 
-            # detect twinx,y axes and avoid double zooming
+            # detect twinx, twiny axes and avoid double zooming
             twinx, twiny = False, False
             if last_a:
                 for la in last_a:
@@ -1038,13 +1051,9 @@ class ToolHelpBase(ToolBase):
         return ", ".join(self.format_shortcut(keymap) for keymap in keymaps)
 
     def _get_help_entries(self):
-        entries = []
-        for name, tool in sorted(self.toolmanager.tools.items()):
-            if not tool.description:
-                continue
-            entries.append((name, self._format_tool_keymap(name),
-                            tool.description))
-        return entries
+        return [(name, self._format_tool_keymap(name), tool.description)
+                for name, tool in sorted(self.toolmanager.tools.items())
+                if tool.description]
 
     def _get_help_text(self):
         entries = self._get_help_entries()
